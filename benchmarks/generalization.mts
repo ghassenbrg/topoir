@@ -214,10 +214,11 @@ function build(seed: number): Case {
   };
 }
 
-const HARD = ["nodeOverlaps", "edgeNodeIntersections", "nonOrthogonalSegments", "emptyRoutes", "endpointBodyCrossings", "droppedRelationships", "droppedComponents"] as const;
+const HARD = ["nodeOverlaps", "edgeNodeIntersections", "nonOrthogonalSegments", "emptyRoutes", "endpointBodyCrossings", "droppedRelationships", "droppedComponents", "droppedLabels"] as const;
 const SOFT = ["labelOverlaps", "annotationOverlaps", "groupTitleIntersections", "coincidentEdgeSegments", "illegalBoundaryCrossings"] as const;
 
 const failures: string[] = [];
+const shapes: { tag: string; aspect: number; deviation: number; ink: number }[] = [];
 const totals: Record<string, number> = {};
 const byFamily: Record<string, { clean: number; runs: number }> = {};
 let compiled = 0;
@@ -260,6 +261,9 @@ for (let seed = 1; seed <= total; seed += 1) {
     soft += metrics[key] ?? 0;
   }
   totals["edgeCrossings"] = (totals["edgeCrossings"] ?? 0) + (metrics["edgeCrossings"] ?? 0);
+  // Shape is a quality property the defect counts cannot express: a diagram can satisfy
+  // every rule above and still be the wrong rectangle to read.
+  shapes.push({ tag, aspect: metrics["aspectRatio"] ?? 0, deviation: metrics["aspectDeviation"] ?? 0, ink: metrics["inkCoverage"] ?? 0 });
   if (hard === 0) cleanHard += 1;
   if (hard === 0 && soft === 0) {
     cleanAll += 1;
@@ -291,6 +295,15 @@ const lines = [
   `| --- | ---: |`,
   ...[...HARD, ...SOFT, "edgeCrossings"].map((key) => `| ${key} | ${totals[key] ?? 0} |`),
   ``,
+  `## Shape`,
+  ``,
+  `| Measure | Value |`,
+  `| --- | ---: |`,
+  `| Within 3x of the aspect target | ${shapes.filter((item) => item.deviation <= Math.log(3)).length} / ${shapes.length} |`,
+  `| Widest produced aspect | ${shapes.length ? Math.max(...shapes.map((item) => item.aspect)).toFixed(1) : 0}:1 |`,
+  `| Mean component ink coverage | ${shapes.length ? (100 * shapes.reduce((sum, item) => sum + item.ink, 0) / shapes.length).toFixed(1) : 0}% |`,
+  `| Canvases under 6% ink | ${shapes.filter((item) => item.ink < 0.06).length} / ${shapes.length} |`,
+  ``,
   `## By composition family`,
   ``,
   `| Family | Fully clean | Runs | Share |`,
@@ -304,6 +317,10 @@ const lines = [
 
 await mkdir(join(root, ".tmp/generalization"), { recursive: true });
 await writeFile(join(root, ".tmp/generalization/report.md"), `${lines.join("\n")}\n`);
-console.log(lines.slice(0, 26).join("\n"));
+// Print through the defect table rather than a fixed line count: the hardcoded 26 cut
+// the summary off immediately before `illegalBoundaryCrossings` and `edgeCrossings`,
+// so the two largest numbers in the run never reached the terminal.
+const familyHeading = lines.indexOf(`## By composition family`);
+console.log(lines.slice(0, familyHeading > 0 ? familyHeading : lines.length).join("\n"));
 console.log(`\nfailures: ${failures.length}  →  .tmp/generalization/report.md`);
 for (const line of failures.slice(0, 20)) console.log(`  ${line}`);

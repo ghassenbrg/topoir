@@ -21,6 +21,13 @@ const defaultIO: CliIO = {
 export async function runCli(argv: readonly string[], io: CliIO = defaultIO): Promise<number> {
   const [command, ...rest] = argv;
   try {
+    // `topoir <command> --help` used to reach parseArgs, which rejects it as an unknown
+    // option; the result was reported as TOP900_INTERNAL_ERROR with no usage text, so an
+    // agent that guessed a flag was told the compiler had crashed.
+    if (command !== undefined && COMMAND_USAGE[command] !== undefined && rest.some((item) => item === "--help" || item === "-h")) {
+      io.stdout.write(`${COMMAND_USAGE[command]}\n`);
+      return 0;
+    }
     switch (command) {
       case undefined:
       case "help":
@@ -58,6 +65,13 @@ export async function runCli(argv: readonly string[], io: CliIO = defaultIO): Pr
   } catch (error) {
     if (error instanceof UsageError) {
       io.stderr.write(`${error.message}\n`);
+      return 2;
+    }
+    // A bad flag is the caller's mistake, not an unexpected failure. TOP9xx is documented
+    // as an uncaught runtime error, so reporting usage there tells an agent to branch the
+    // wrong way entirely.
+    if (isUsageFailure(error)) {
+      io.stderr.write(`TOP120_CLI_USAGE ${error instanceof Error ? error.message : String(error)}\n\n${command !== undefined && COMMAND_USAGE[command] !== undefined ? `${COMMAND_USAGE[command]}\n` : helpText()}`);
       return 2;
     }
     io.stderr.write(`TOP900_INTERNAL_ERROR ${error instanceof Error ? error.message : String(error)}\n`);
@@ -333,3 +347,37 @@ Exit codes: 0 success, 1 document/compile failure, 2 usage error, 3 I/O/internal
 }
 
 class UsageError extends Error {}
+
+/** Node reports every argument-parsing problem with an `ERR_PARSE_ARGS_*` code. */
+function isUsageFailure(error: unknown): boolean {
+  return typeof (error as { code?: unknown })?.code === "string" && String((error as { code: string }).code).startsWith("ERR_PARSE_ARGS_");
+}
+
+/** Per-command usage, so `topoir <command> --help` answers instead of failing. */
+const COMMAND_USAGE: Record<string, string> = {
+  validate: `topoir validate <file|-> [--json] [--warnings-as-errors] [--assets <directory>]
+
+Parse, structurally validate and check semantic references.`,
+  render: `topoir render <file|-> [-o|--output path|-] [-f|--format svg|png|both] [-V|--view id|all]
+                            [--manifest] [--assets <directory>] [--json] [--warnings-as-errors]
+
+Compile one or all views to SVG, PNG or both.`,
+  export: `topoir export <file|-> [-o|--output path|-] [-f|--format svg|png|both] [-V|--view id|all]
+                            [--manifest] [--assets <directory>] [--json] [--warnings-as-errors]
+
+Alias of the render command.`,
+  inspect: `topoir inspect <file|-> [--stage model|view|geometry|metrics|manifest] [-V|--view id] [--assets <directory>]
+
+Print a normalized pipeline stage as JSON.`,
+  icons: `topoir icons list [--json] [--assets <directory>]
+topoir icons search <query> [--json] [--assets <directory>]
+
+Search the offline asset inventory with provenance.`,
+  assets: `topoir assets list [--json] [--assets <directory>]
+topoir assets search <query> [--json] [--assets <directory>]
+
+Alias of the icons command.`,
+  doctor: `topoir doctor [--json]
+
+Verify schema, layout, SVG and native PNG support.`,
+};

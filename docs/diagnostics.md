@@ -11,7 +11,11 @@ Every diagnostic has a stable `code`, severity, message, JSON-pointer `path` whe
 | TOP5xx | Artifact output | scene/SVG/PNG/export failure |
 | TOP9xx | Unexpected failure | uncaught CLI/runtime error |
 
+`TOPOIR_DIAGNOSTIC_CODES` exported from `@topoir/schema` is the complete machine-readable list, and a test holds it to what the source can actually emit. Match on `code`; do not parse message wording.
+
 Errors block a successful result. Warnings allow an artifact but identify a quality condition that may need semantic remodeling or an engine issue. `--warnings-as-errors` is appropriate for checked-in diagrams.
+
+CLI usage — a bad flag or a missing argument — reports `TOP120_CLI_USAGE` and exits 2, with that command's usage text. It is not a `TOP9xx` internal failure. Every command also accepts `--help`.
 
 Human output:
 
@@ -40,11 +44,14 @@ Do not parse message wording. Match `code`, then use `path` and `range` to edit 
 | `TOP402_COMPOSITION_PORT_UNSUPPORTED` | Use topology/layers for explicit endpoint ports; experimental panels/sequence do not yet honor them |
 | `TOP412_RELATIONSHIP_DROPPED` | A declared relationship produced no route and is missing from the diagram; a layout backend lost it |
 | `TOP413_COMPONENT_DROPPED` | A declared component was not placed and is missing from the diagram |
+| `TOP414_EDGE_LABEL_DROPPED` | A relationship was routed but its declared label was not placed, so the connector is drawn unexplained |
 | `TOP423_ILLEGAL_BOUNDARY_CROSSING` | A connector enters or leaves a boundary more often than its endpoints require; inspect the route or the composition |
 | `TOP424_EDGE_CROSSES_OWN_ENDPOINT` | A connector runs back across its own source or target component, so the arrow appears to leave the wrong side; inspect the route |
 | `TOP425_EDGE_SEGMENTS_COINCIDENT` | Two connectors are drawn along the same line for a visible stretch, so two relationships read as one; inspect the composition or report a routing defect |
 | `TOP430_LABEL_OVERLAP` | Inspect colliding node, heading, annotation or edge label; revise composition or report a refinement defect |
 | `TOP431_GROUP_TITLE_INTERSECTION` | A connector crosses a boundary heading; inspect the route/refinement |
 | `TOP432_ANNOTATION_OVERLAP` | A note overlaps a node, heading or another annotation |
+| `TOP433_ASPECT_OFF_TARGET` | The diagram is more than 3x away from the view's `layout.aspectRatio`, so it is not the shape it was asked for; raise the component count it has room for, or set a target that suits the model |
+| `TOP434_CANVAS_SPARSE` | Components cover under 6% of the canvas, so the diagram reads as mostly empty space |
 
 An absence of these diagnostics is necessary but not sufficient for the [visual acceptance benchmark](visual-benchmark.md).

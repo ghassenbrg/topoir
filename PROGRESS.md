@@ -70,6 +70,117 @@ The objective for this session was to reach `exple4.png`'s quality bar for ref-0
 
 **Removed rather than shipped.** A band-balancing pass that split an over-tall layer reached the reference's proportions (aspect 2.65) but cost 3–7 crossings and never won a candidate, so it was deleted rather than left in as unused machinery.
 
+### Session record — 2026-09-19, full audit and the shape of a diagram
+
+A full audit was run against the working tree: `pnpm check`, both benchmarks, the
+rendered gallery and the packaging and CI configuration. The headline numbers in this
+ledger reproduced exactly — 100% compile, 100% free of hard geometry defects, 92.5% free
+of every measured defect over 200 synthetic architectures — and the reference benchmark
+still reports `NOT MET` for all six, correctly. What the audit found was not an
+overstated number. It was that the thing being measured was not the thing being claimed.
+
+**The quality model could not see an unusable diagram.** A 120-node chain compiled to
+**37,491x370 — an aspect ratio of 101:1** — and reported `ok`, zero warnings, zero errors
+and every defect metric at zero. The product goal is presentation-grade quality; the gate
+measured geometric legality only, and those are not the same property. Three causes, all
+now fixed:
+
+- *The aspect term was never compared.* Candidate evaluation returned the first layout
+  with no defects and no crossings. A chain trivially has no crossings, so it exited
+  before the aspect term applied — `candidatesEvaluated=1` on every one of these cases.
+  The early exit now also requires the shape to be within tolerance.
+- *The aspect term was mis-weighted.* At 500 against 1000 for a single edge crossing,
+  being off-target by a factor of e cost half a crossing. The scorer was correctly
+  preferring a 9:1 ribbon nobody can read over one crossing. This is also why the
+  band-balancing pass recorded above as "reached the reference's proportions (aspect
+  2.65) but cost 3-7 crossings and never won a candidate" lost: it did not lose on
+  merit, it lost to the weight. The term is now 4000, so a 3x miss costs about four
+  crossings.
+- *A layered graph never wraps.* `elk.aspectRatio` on its own does nothing to one —
+  measured, it left the 120-node chain at 348:1. The layered wrapping pass reaches 1.6
+  exactly and runs faster, and is now a scored candidate, tried only when a result is
+  both off-target and longer than a legible extent.
+
+Wrapping is gated on **length, not ratio**, because wrapping the three-node quickstart
+hit the aspect target exactly and was plainly worse: its one straight connector became an
+S-bend around two rows. The quickstart is untouched and its golden is unchanged.
+
+New metrics `aspectRatio`, `aspectDeviation` and `inkCoverage`, with
+`TOP433_ASPECT_OFF_TARGET` and `TOP434_CANVAS_SPARSE`. The generalization report now
+carries a shape section, so the property that went unmeasured is now part of the corpus
+baseline: **110/120 within 3x of target, widest 9.4:1, mean ink coverage 12.7%, 17/120
+under 6% ink.** That is a floor to be raised, not a pass mark.
+
+**Measured effect on the published gallery.** All five reviewed side by side:
+
+| Example | Before | After |
+| --- | ---: | ---: |
+| authentication-flow | 3478x381 (9.13) | 1848x716 (2.58) |
+| multi-region | 4062x720 (5.64) | 2700x1011 (2.67) |
+| disaster-recovery | 3754x555 (6.76) | 2728x655 (4.17) |
+| checkout-platform | 3336x563 (5.93) | 2333x704 (3.32) |
+| data-platform | 3136x548 (5.73) | 2197x635 (3.46) |
+
+The 120-node benchmark geometry went from **40,616x453 to 5,693x2,299**.
+
+**A third dropped-entity class, found while fixing the second.** ELK's wrapping pass
+throws `java.util.NoSuchElementException` on any edge carrying a label, under every
+cutting strategy, so the wrapped candidate is laid out without label boxes. Edge labels
+then vanished from the diagram **with every metric still clean** — the same blind spot
+TOP412 and TOP413 were added for. Labels are now reconstructed from the measured text
+whenever the backend returns none, and `TOP414_EDGE_LABEL_DROPPED` guards the class.
+`droppedLabels` is 0 across the corpus.
+
+**Corrections to this ledger.** The quickstart golden recorded above is wrong in three
+places. The asserted value is and remains
+`080c294bef1100b4f8888c8f2b9f614666fe7cec6a96b7abbc06f03d4c34aed6`; the earlier entries
+`26fce487...`, `6b87dca6...` and `f26802cb...` are all stale. A re-baseline had reached
+the working tree with no ledger entry, which is exactly the unreviewed-drift the golden
+exists to prevent. The quickstart was re-rendered and visually reviewed for this record:
+labels sit above their connectors at the true route midpoints, containment and arrowheads
+are correct.
+
+The recorded benchmark of "139.28 ms minimum, 158.34 ms median" is also stale by an order
+of magnitude. On the same machine and Node v24.11.0 the redesign had already taken the
+median to **1,210 ms** — a 7.6x regression that was never recorded, because
+`CONTRIBUTING.md` declines to gate on wall clock and nothing else tracked it. Adding the
+wrapped candidate takes the worst case to **2,025 ms**, since a ribbon now pays for a
+second layout pass; a diagram that is not a ribbon pays nothing. `pnpm check` is
+unchanged at ~36s.
+
+**Other audit findings, fixed.**
+
+- CI ran `on: push: branches: [main]` while the default branch is `master`, so push
+  builds had never fired. Now `[master, main]`.
+- `topoir inspect --help` reached `parseArgs`, which rejects it as an unknown option, and
+  the result was reported as `TOP900_INTERNAL_ERROR` with no usage text — telling an
+  agent the compiler had crashed when it had mistyped a flag. Every command now accepts
+  `--help`, and argument errors report `TOP120_CLI_USAGE` with exit 2.
+- The contract asks agents to branch on `code`, but the codes were string literals across
+  five packages with no list, and the reference documented about a third of them.
+  `TOPOIR_DIAGNOSTIC_CODES` in `@topoir/schema` is now the complete list, with a test that
+  reads the codes back out of the source and holds the registry to them.
+- The generalization console summary was truncated at a hardcoded `lines.slice(0, 26)`,
+  which cut it off immediately before `illegalBoundaryCrossings` and `edgeCrossings` —
+  the two largest numbers in the run never reached the terminal. It now prints through
+  the whole defect table.
+- `layout-elk` (1,769 lines) and `renderer-svg` (778 lines) had **zero** unit tests
+  between them, although this ledger's own analysis names routing as the bottleneck. All
+  coverage was end-to-end aggregate counts, so a corpus failure had nothing to pin it to.
+  Added 7 router tests, 7 composition/shape tests and 10 renderer tests. `pnpm check` now
+  passes **91 tests in 15 files**, up from 65 in 12.
+
+**Known and unfixed.** Wrapped layouts leave a dead quadrant where ELK aligns the shorter
+chunk away from the origin — visible in the upper left of `authentication-flow`. Mean ink
+coverage across the gallery is 14.0%, barely moved from 13.8%, because the sparse cases
+are sparse for placement reasons the wrap gate does not touch. `edgeCrossings` remains
+8,458 over 200 cases and is still excluded from `defectCount` by the standing decision
+that a crossing is a legibility cost; that decision should be revisited now that shape is
+measured. The synthetic corpus still caps at 42 components and depth 3, so it does not
+exercise the scale at which the ribbon defect appeared at all — the 101:1 case would not
+have been caught by it. Six dependabot branches are open, including elkjs 0.12.0 for the
+core layout engine. There is still no linter or formatter in the repository.
+
 ### Session record — 2026-09-19, generalization over arbitrary input
 
 The user's requirement changed the acceptance target: the six screenshots are the quality

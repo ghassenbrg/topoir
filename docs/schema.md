@@ -83,6 +83,8 @@ Unlike the graph-backend families, this one supports explicit ports, attaches ea
 
 ### Sibling order
 
+`view.layout.aspectRatio` is the proportion the finished diagram should aim for, width over height; the default is 1.6. It is a preference the compiler scores candidates against, not a constraint it can always satisfy — a model whose structure forces one long run cannot be square. When the result lands more than 3x away from the target, the compiler says so with `TOP433_ASPECT_OFF_TARGET` rather than leaving the miss silent, and a diagram that grows past a legible extent is re-cut into stacked rows if that scores better. `TOP434_CANVAS_SPARSE` reports a canvas that is mostly empty.
+
 `order` is available on groups, nodes, ports, edges, flows and annotations. Explicitly ranked siblings come first in their declared rank; unranked siblings follow in stable ID order. An absent `order` means "unranked", not `order: 0`. Rank is a deterministic input to layout, not a coordinate: in the `topology` and `layers` families the layout engine may still reorder items within a layer to reduce crossings.
 
 Available themes: `technical-clean`, `cloud-architecture`, `executive`, `dark-engineering`, `blueprint`, `whiteboard`, `minimal`. They affect component shape, dimensions, icon treatment, typography, connector radius, boundary treatment and palette. Composition remains an independent choice. Whiteboard is an initial grammar, not full illustrated sketch rendering; isometric, insets, arbitrary decorative regions and mixed-language subregions are not implemented.

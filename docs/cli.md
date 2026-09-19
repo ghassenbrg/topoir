@@ -70,3 +70,5 @@ topoir doctor
 | 3 | I/O or unexpected internal failure |
 
 Diagnostic codes, not prose, are the stable automation interface.
+
+Every command accepts `--help` and prints its own usage. A bad flag or missing argument is reported as `TOP120_CLI_USAGE` with exit code 2 and that command's usage text, not as an internal failure.
