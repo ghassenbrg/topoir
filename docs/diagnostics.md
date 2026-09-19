@@ -79,7 +79,23 @@ the view says nothing about that drawing and is not reported.
 | Code | Repair |
 | --- | --- |
 | `TOP440_TEXT_ABBREVIATED` | Authored text did not fit and was shortened with an ellipsis. The message names the owner, the content role, the drawn text and how many characters are not drawn. Shorten the text, give the component more text width, or accept the abbreviation deliberately |
-| `TOP442_TEXT_NOT_LEGIBLE` | Text is drawn on a fill it cannot be read against. The message states both colours and the measured WCAG contrast ratio. Change the text or fill colour for that kind |
+| `TOP442_TEXT_NOT_LEGIBLE` | Text cannot be distinguished from its backdrop at all, so the content is lost. Measured against the mark actually painted behind the glyphs, not against a theme token |
+| `TOP443_TEXT_LOW_CONTRAST` | Text is visible but below the WCAG bar. A warning, not an error: the content survives and the failure is an accessibility one |
+| `TOP450_ELEMENT_NOT_REPRESENTED` | The document declares an element that nothing in the drawing represents. A geometrically clean diagram that omits a required fact is still the wrong diagram |
+| `TOP451_MARK_NOT_ATTRIBUTED` | A scene mark has no owning model element, so nothing explains why it is drawn |
+| `TOP452_MARK_CLIPPED` | A mark's *painted* extent lies outside the canvas, so part of it is cropped from the artifact. Checked on final ink, not layout rectangles |
+| `TOP453_CONTENT_OMITTED` | Authored content is absent from the drawing entirely, with the reason given |
+
+`TOP442` and `TOP443` are deliberately separate. Text at 1:1 against its own fill is
+*invisible* — the reader cannot know it is there, the content is lost, and that is an error.
+Text at 2.5:1 is *visible but hard to read* — the content survives and the failure is an
+accessibility one, so it is a warning. Conflating them would either let the white-on-white
+defect pass as a warning or declare every deliberately soft secondary label a broken diagram.
+
+Contrast is measured against the mark **actually painted behind** a glyph run, following
+paint order — the card a label sits on, not the canvas default and not the theme token
+nominally paired with it. A label on a dark card is correctly judged readable; a label on an
+icon-shaped component with no card behind it is correctly judged against the canvas.
 
 Abbreviation is a legal outcome, but never a silent one: measurement declares it, so a
 caller can tell full content from shortened content without comparing pictures. Every

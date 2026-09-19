@@ -164,18 +164,27 @@ describe("review regression: content preservation", () => {
 });
 
 describe("review regression: paint and font resolution", () => {
-  // Owning task: T02 (fixed). Baseline: white text on white fill compiled clean.
+  /**
+   * Owning task: T02, refined by T09. Baseline: white text on white fill compiled clean.
+   *
+   * T09 moved contrast onto the scene, where the backdrop is the mark actually painted
+   * behind the glyphs rather than the theme token nominally paired with them. So this now
+   * names the specific occurrence rather than the kind — a stricter identification, and
+   * the only reported instance rather than one of two duplicates.
+   */
   it("diagnoses text that cannot be read against its own fill", async () => {
-    const { result } = await compileFixture("invisible-text");
+    const { result, view } = await compileFixture("invisible-text");
     const reported = result.diagnostics.filter((diagnostic) => diagnostic.code === "TOP442_TEXT_NOT_LEGIBLE");
     expect(reported).toHaveLength(1);
     expect(reported[0]?.severity).toBe("error");
-    // The message states the actual paint and the measured ratio, so the repair is obvious.
-    expect(reported[0]?.message).toContain("service");
+    // The message names the affected occurrence, the actual paint and the measured ratio.
+    const node = view.view.nodes[0];
+    expect(reported[0]?.message).toContain(node?.id);
     expect(reported[0]?.message).toContain("#FFFFFF");
     expect(reported[0]?.message).toContain("1:1");
     // An unreadable drawing is not a successful compilation.
     expect(result.ok).toBe(false);
+    expect(view.metrics.illegibleRuns).toBe(1);
   });
 
   // Owning task: T02 (fixed). Baseline: scene claimed "Invented Font Family", SVG embedded DejaVu Sans.
@@ -509,5 +518,93 @@ describe("review regression: resolved font resources", () => {
   it("says nothing about text the pack covers", async () => {
     const { result } = await compileFixture("long-label");
     expect(result.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("TOP332_GLYPH_NOT_AVAILABLE");
+  });
+});
+
+describe("review regression: the scene the reader receives", () => {
+  /**
+   * T09 acceptance, stated as one test per named defect.
+   *
+   * "the long-badge, missing-role, unknown glyph, missing annotation and detached-arrow
+   * defects cannot pass presentation checks."
+   *
+   * Presentation acceptance is not the same as successful compilation. Each of these
+   * either fails outright or carries a diagnostic naming what is wrong; none of them
+   * produces a clean result.
+   */
+  const presentationDiagnostics = (codes: readonly string[]): readonly string[] =>
+    codes.filter((code) => code.startsWith("TOP44") || code.startsWith("TOP45") || code.startsWith("TOP33") || code.startsWith("TOP42"));
+
+  it("a long badge cannot pass presentation checks silently", async () => {
+    const { result, view } = await compileFixture("wide-badge");
+    // It is either contained, or reported. It is never both unreported and overflowing.
+    const badge = view.measured.nodes[0]?.badgeText;
+    expect(badge?.disposition).toBe("rendered");
+    expect(view.metrics.clippedMarks).toBe(0);
+  });
+
+  it("a missing asset role cannot pass presentation checks", async () => {
+    const document = JSON.stringify({
+      apiVersion: "topoir.dev/v1alpha1",
+      kind: "Architecture",
+      metadata: { name: "missing-role" },
+      model: { nodes: [{ id: "a", kind: "service", label: "Service", visual: { assets: ["devicon:postgresql", "nowhere:at-all"] } }] },
+      views: [{ id: "overview", design: { composition: "architecture" } }],
+    });
+    const result = await new TopoIRCompiler().compile(document, { format: "svg" });
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain("TOP322_ASSET_NOT_FOUND");
+    expect(result.ok).toBe(false);
+  });
+
+  it("an unknown glyph cannot pass presentation checks", async () => {
+    const document = JSON.stringify({
+      apiVersion: "topoir.dev/v1alpha1",
+      kind: "Architecture",
+      metadata: { name: "unknown-glyph" },
+      model: { nodes: [{ id: "a", kind: "service", label: "支払いサービス" }] },
+      views: [{ id: "overview", design: { composition: "architecture" } }],
+    });
+    const result = await new TopoIRCompiler().compile(document, { format: "svg" });
+    expect(presentationDiagnostics(result.diagnostics.map((diagnostic) => diagnostic.code))).toContain("TOP332_GLYPH_NOT_AVAILABLE");
+  });
+
+  it("a missing annotation cannot pass presentation checks", async () => {
+    const dropped = await compileWithGeometry("annotated-regions", (geometry) => ({ ...geometry, annotations: [] }));
+    const codes = dropped.diagnostics.map((diagnostic) => diagnostic.code);
+    // Reported by geometry coverage and, independently, by scene representation.
+    expect(codes).toContain("TOP416_ANNOTATION_DROPPED");
+    expect(codes).toContain("TOP450_ELEMENT_NOT_REPRESENTED");
+    expect(dropped.ok).toBe(false);
+  });
+
+  it("a detached arrow cannot pass presentation checks", async () => {
+    const detached = await compileWithGeometry("annotated-regions", (geometry) => ({
+      ...geometry,
+      edges: geometry.edges.map((edge) => ({
+        ...edge,
+        points: edge.points.map((point) => ({ x: point.x + 100_000, y: point.y + 100_000 })),
+      })),
+    }));
+    expect(detached.diagnostics.map((diagnostic) => diagnostic.code)).toContain("TOP426_EDGE_ENDPOINT_DETACHED");
+    expect(detached.ok).toBe(false);
+  });
+
+  /**
+   * Header and legend are evaluated with body content, which the acceptance also requires.
+   * Before T08 they were measured in the renderer and never reached any quality pass at all.
+   */
+  it("evaluates header and legend alongside the diagram body", async () => {
+    const source = await readFile(fileURLToPath(new URL("../../../examples/multi-region.topoir.yaml", import.meta.url)), "utf8");
+    const result = await new TopoIRCompiler().compile(source, { format: "svg" });
+    const view = result.views[0];
+    if (view === undefined) throw new Error("no view");
+    const { sceneDocument } = await import("@topoir/renderer-svg");
+    const page = sceneDocument(view.scene).pages[0];
+    if (page === undefined) throw new Error("no page");
+    const owners = new Set(page.primitives.map((primitive) => primitive.owner.id));
+    expect(owners).toContain("title");
+    expect([...owners].some((id) => id.startsWith("legend:"))).toBe(true);
+    // And they were checked: the clipping pass covers every primitive on the page.
+    expect(view.metrics.clippedMarks).toBe(0);
   });
 });

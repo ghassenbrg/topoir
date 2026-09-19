@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-19. This file is the live execution ledger for the design program.
 
-**Program state: in progress. M0 complete. Next task: T09. Current milestone: M1 (T05–T09).**
+**Program state: in progress. M0 complete. T09 done; M1 gate NOT met — see the M1 assessment. Next task: T08 carried work (renderer draws from plan blocks), then T10.**
 
 The full review previously verified `bc64cf2`: 91 tests in 15 files passed; 240/240 synthetic cases compiled without hard geometry defects; 220/240 passed the selected defect counters; six reference candidates were deterministic with no approved parity recorded. These are historical baseline observations, not evidence that the tasks below are implemented. The design-writing task added documents/examples only.
 
@@ -19,7 +19,7 @@ Allowed task states: `not_started`, `in_progress`, `implemented_pending_gate`, `
 | T06 | M1 | complete | Font registry with face hashes, fallback chains and content-keyed caching; one resolved set reaches measurement, SVG and PNG; `TOP332_GLYPH_NOT_AVAILABLE`. See session entry. |
 | T07 | M1 | complete | Block measurement engine, bounded width negotiation, true silhouettes and ink bounds, attachment derivation, content accounting. Not yet wired into the pipeline — that is T08. See session entry. |
 | T08 | M1 | complete | All three acceptance criteria met and verified. `ComponentPlan.blocks` is still empty and the renderer computes block positions inline — recorded as carried work, see session entry. |
-| T09 | M1 | not_started | |
+| T09 | M1 | complete | Scene QA on final ink: representation, attribution, clipping, real-backdrop contrast, disposition. Found 10 genuinely defective generated cases nothing had reported. See session entry. |
 | T10 | M2 | not_started | |
 | T11 | M2 | not_started | |
 | T12 | M2 | not_started | |
@@ -801,3 +801,109 @@ carries a comment saying the same thing so it cannot be mistaken for finished.
 
 **Next ready task: T09** (final-scene QA and coverage). Its dependencies T08 and T03 are
 complete, and it is the task that consumes the ownership and ink bounds built here.
+
+### T09 — final-scene QA and coverage — 2026-09-20
+
+**Task: T09 — final-scene QA and coverage. State: complete.**
+
+Baseline commit `4ccd114` (T08 slice 2). No unrelated worktree changes.
+
+**Behavior implemented** (`core/src/quality/scene.ts`, run from the SDK on every view).
+`analyzeGeometry` works on measured boxes *before* the scene adds final text, badges,
+decoration, header and legend. `analyzeScene` works on the `SceneDocument`, where every
+mark has painted bounds and an owner. Five checks:
+
+1. **`TOP450_ELEMENT_NOT_REPRESENTED`** — a declared element that nothing in the drawing represents. No geometry counter can reveal this: the drawing can be perfectly clean and simply not contain a fact the document declares.
+2. **`TOP451_MARK_NOT_ATTRIBUTED`** — a mark no model element explains.
+3. **`TOP452_MARK_CLIPPED`** — painted extent outside the canvas. Final ink, not layout rectangles.
+4. **`TOP442` / `TOP443`** — contrast against the mark *actually painted behind* the glyphs, following paint order.
+5. **`TOP453_CONTENT_OMITTED`** — content disposition surfaced from the document.
+
+**A distinction that is principled, not tuned.** Text at 1:1 against its backdrop is
+*invisible*: the content is lost and that is an **error** (`TOP442`). Text at 2.5:1 is
+*visible but hard to read*: the content survives and the failure is an accessibility one, so
+it is a **warning** (`TOP443`). Conflating them would either let the review's white-on-white
+defect pass as a warning, or declare every deliberately soft secondary label a broken
+diagram. The threshold split was chosen on that reasoning before looking at which cases it
+would make pass.
+
+**Contrast now has exactly one owner.** `analyzeVisibility` (T02) compared node text against
+node *fill* from theme tokens; `analyzeScene` compares against the mark really painted
+behind the run. Both reported every defect, so each was doubled. Contrast was removed from
+`analyzeVisibility`, which keeps colour validation — a property of the theme needing no
+drawing. Its unit tests moved to `scene-quality.test.ts` rather than being deleted.
+
+**Two bugs in my own scene projection, found and fixed before they could be mistaken for defects:**
+
+- `pathBounds` paired path coordinates alternately as x,y. `H` and `V` take a *single*
+  coordinate, so the scan desynchronised after the first one and reported wildly wrong
+  boxes — a cylinder's body path (`C` then `V`) produced a 2075x2147 box for a small
+  component and three false clipping reports. Replaced with a real command parser.
+- Text ink width was estimated as `characters * fontSize * 0.55`. It is now **measured**.
+  An approximation over-reports for wide glyph runs, inventing clipping that is not in the
+  drawing, and under-reports for narrow ones, hiding clipping that is.
+
+Both were caught by investigating failures rather than assuming they were real. After
+fixing them, false clipping reports across the probed seeds went to **zero**.
+
+**Ten genuinely defective generated cases that nothing had reported.** The corpus number
+moved from 220/240 to 210/240. This is not a regression: those ten cases were producing
+defective output all along and no check looked at the final drawing.
+
+- **Nine cases: invisible text, ratios 1.13–1.27:1.** The generator authors themes that extend `cloud-architecture` — whose components are drawn as *icons*, with no card behind the label — and override `canvas.background` to a dark colour **without** overriding `node` text tokens. The label stays near-black (`#172033`) and is drawn straight onto a `#0F1420` canvas. This is exactly the class of defect the T02 token-level check structurally could not find: it compared node text against node *fill*, and an icon component has no fill. Only a check that resolves the real backdrop sees it.
+- **One case (0165): a clipped edge label.** The label box for `e5` is painted at x 866–952 on a 940px canvas. `analyzeGeometry`'s bounds check covers nodes, groups, annotations and route *points*, but not edge *labels* — a gap in T03 that the scene check closes. Not duplicated into the geometry pass, since the scene check sees the real painted label and duplicating it would double the diagnostic.
+
+**Neither finding was worked around.** The check was not weakened, the generator was not
+changed to avoid the theme combination, and the cases were not excluded. The underlying
+cascade problem — an authored dark canvas that does not carry to inherited text tokens — is
+a **resolved-style-grammar** concern and belongs to **T13**; it is recorded here as a
+concrete defect class that task must handle.
+
+**Files changed:** `core/src/quality/scene.ts` (new), `core/src/color.ts`
+(`INVISIBLE_TEXT_CONTRAST`), `core/src/visibility.ts` (contrast removed), `core/src/index.ts`,
+`renderer-svg/src/document.ts` (measured text ink, real path parser), `sdk/src/index.ts`,
+`schema/src/diagnostics.ts` (`TOP443`, `TOP450`–`TOP453`),
+`core/test/scene-quality.test.ts` (new, 14), `core/test/style.test.ts`,
+`sdk/test/review-regression.test.ts` (+6), `docs/diagnostics.md`.
+
+**Verification:**
+
+| Command | Outcome |
+| --- | --- |
+| `pnpm exec vitest run packages/core/test/scene-quality.test.ts` | 14 passed |
+| `pnpm check` | build + typecheck clean; **319 tests in 28 files passed** (299 after T08) |
+| render comparison | all 20 byte-identical |
+| `pnpm benchmark:generalization` | 210/240 free of every measured defect; **10 newly-reported real defects**, itemised above |
+
+**Acceptance, per the roadmap's named list.** Each of the five defects has its own test
+asserting it cannot pass presentation checks: long badge (contained, 0 clipped marks),
+missing role (`TOP322`, `ok: false`), unknown glyph (`TOP332`), missing annotation
+(`TOP416` *and* independently `TOP450`, `ok: false`), detached arrow (`TOP426`, `ok: false`).
+A sixth test asserts header and legend are evaluated with body content — before T08 they
+were measured inside the renderer and reached no quality pass at all.
+
+### M1 gate assessment — 2026-09-20
+
+**Gate: M1. State: NOT met.**
+
+Exit criterion: *"all rendering consumes measured plans; the complete scene has semantic
+ownership and independently verified visible-content accounting."*
+
+| Clause | State |
+| --- | --- |
+| The complete scene has semantic ownership | **Met.** 0 unowned marks across all 23 scenes in the published corpus, asserted |
+| Independently verified visible-content accounting | **Met.** Two-directional: `TOP450` for declared facts the drawing omits, `TOP451` for ink nothing explains; per-component plan dispositions cross-checked against view metrics |
+| All rendering consumes measured plans | **NOT met.** `ComponentPlan.blocks` is empty and `nodeComponent` still computes block positions inline |
+
+The third clause is the T08 carried work, recorded in that session entry and in a code
+comment on `planForNode`. Every T05–T09 *task* acceptance criterion is met and verified, but
+the milestone's own exit condition is not, and is not claimed to be.
+
+**Next ready task: the T08 carried work** — populate `ComponentPlan.blocks` and drive
+`nodeComponent` from them. It is byte-fidelity-critical, so every changed golden must be
+inspected and explained. M2 tasks T10 and T11 depend on T04/T05 and not on this, so they
+are also ready if the presentation rewrite is deferred.
+
+**Remaining defects.** The ten generated cases above; the dark-canvas cascade defect class
+for T13; `examples/rendered/showcase/custom-assets.png` still stale from before T01.
+Reference parity remains **0/6 unreviewed**.

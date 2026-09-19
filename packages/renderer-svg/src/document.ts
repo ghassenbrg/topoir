@@ -1,4 +1,5 @@
-import type { Rect } from "@topoir/core";
+import type { Rect, TextMeasurer } from "@topoir/core";
+import { bundledFontTextMeasurer } from "@topoir/core";
 import type { LayerId, SceneDocument, ScenePrimitive } from "@topoir/core";
 import type { Scene, SceneElement, SceneOwner } from "./scene.js";
 
@@ -24,7 +25,7 @@ export function unowned(scene: Scene): readonly string[] {
   return found;
 }
 
-export function sceneDocument(scene: Scene): SceneDocument {
+export function sceneDocument(scene: Scene, measurer: TextMeasurer = bundledFontTextMeasurer()): SceneDocument {
   const primitives: ScenePrimitive[] = [];
   const semanticIndex: Record<string, string[]> = {};
   let counter = 0;
@@ -34,7 +35,7 @@ export function sceneDocument(scene: Scene): SceneDocument {
     const owner = element.owner ?? { kind: "chrome" as const, id: "unattributed" };
     const id = `p${counter++}`;
     const layer = layerFor(owner, path);
-    const primitive = toPrimitive(element, id, owner, layer);
+    const primitive = toPrimitive(element, id, owner, layer, measurer);
     if (primitive === undefined) return;
     primitives.push(primitive);
     semanticIndex[owner.id] = [...(semanticIndex[owner.id] ?? []), id];
@@ -76,7 +77,7 @@ function layerFor(owner: SceneOwner, path: readonly string[]): LayerId {
   return owner.id === "canvas" ? "background" : "chrome";
 }
 
-function toPrimitive(element: SceneElement, id: string, owner: SceneOwner, layer: LayerId): ScenePrimitive | undefined {
+function toPrimitive(element: SceneElement, id: string, owner: SceneOwner, layer: LayerId, measurer: TextMeasurer): ScenePrimitive | undefined {
   const base = { id, owner: { kind: owner.kind, id: owner.id }, layer } as const;
   switch (element.type) {
     case "rect": {
@@ -90,7 +91,16 @@ function toPrimitive(element: SceneElement, id: string, owner: SceneOwner, layer
     case "path":
       return { ...base, type: "path", d: element.d, inkBounds: pathBounds(element.d, element.strokeWidth ?? 0), ...(element.fill === undefined ? {} : { fill: element.fill }), ...(element.stroke === undefined ? {} : { stroke: element.stroke }), ...(element.strokeWidth === undefined ? {} : { strokeWidth: element.strokeWidth }), ...(element.dash === undefined ? {} : { dash: element.dash }) };
     case "text": {
-      const width = Math.max(1, ...element.lines.map((line) => line.length * element.fontSize * 0.55));
+      // Measured, not estimated. A character-count approximation over-reports width for
+      // wide glyph runs, which would make the clipping check invent defects that are not
+      // in the drawing — and under-reports for narrow ones, hiding real clipping.
+      const style = {
+        fontSize: element.fontSize,
+        lineHeight: element.lineHeight / element.fontSize,
+        ...(element.fontWeight === undefined ? {} : { fontWeight: element.fontWeight as 400 | 500 | 600 | 700 }),
+      };
+      const advances = element.lines.map((line) => measurer.measure(line, style).width);
+      const width = Math.max(1, ...advances);
       const height = element.lines.length * element.lineHeight;
       const x = element.anchor === "middle" ? element.x - width / 2 : element.anchor === "end" ? element.x - width : element.x;
       return {
@@ -100,7 +110,7 @@ function toPrimitive(element: SceneElement, id: string, owner: SceneOwner, layer
         fill: element.fill,
         text: {
           source: element.lines.join(" "),
-          lines: element.lines.map((line, index) => ({ text: line, x, baseline: element.y + index * element.lineHeight, advance: width, inkBounds: { x, y: element.y - element.fontSize + index * element.lineHeight, width, height: element.lineHeight }, continuesPrevious: false })),
+          lines: element.lines.map((line, index) => ({ text: line, x, baseline: element.y + index * element.lineHeight, advance: advances[index] ?? width, inkBounds: { x, y: element.y - element.fontSize + index * element.lineHeight, width: advances[index] ?? width, height: element.lineHeight }, continuesPrevious: false })),
           fontFamily: "",
           fontSize: element.fontSize,
           fontWeight: element.fontWeight ?? 400,
@@ -125,11 +135,77 @@ function grow(rect: Rect, stroke: number): Rect {
   return { x: rect.x - half, y: rect.y - half, width: rect.width + stroke, height: rect.height + stroke };
 }
 
-/** Bounding box of the coordinates in a path, grown by half the stroke. */
+/**
+ * Bounding box of a path's coordinates, grown by half the stroke.
+ *
+ * Commands are parsed rather than the numbers being paired off alternately. `H` and `V`
+ * each take a single coordinate, so a naive alternating scan desynchronises after the
+ * first one and reports wildly wrong boxes — which made the clipping check invent defects
+ * on cylinder components, whose body path uses `C` then `V`.
+ *
+ * Control points of a curve are included. That over-reports slightly for a curve that
+ * bulges less than its hull, which is the safe direction: it can make a borderline mark
+ * look clipped, never hide one that genuinely is.
+ */
 function pathBounds(d: string, stroke: number): Rect {
-  const numbers = [...d.matchAll(/-?\d+(?:\.\d+)?/gu)].map((match) => Number(match[0]));
-  const xs = numbers.filter((_value, index) => index % 2 === 0);
-  const ys = numbers.filter((_value, index) => index % 2 === 1);
+  const xs: number[] = [];
+  const ys: number[] = [];
+  let cursor = { x: 0, y: 0 };
+  const tokens = d.match(/[A-Za-z]|-?\d+(?:\.\d+)?/gu) ?? [];
+  let index = 0;
+  let command = "";
+  const take = (): number => Number(tokens[index++] ?? 0);
+  const point = (x: number, y: number): void => {
+    xs.push(x);
+    ys.push(y);
+    cursor = { x, y };
+  };
+  while (index < tokens.length) {
+    const token = tokens[index];
+    if (token !== undefined && /[A-Za-z]/u.test(token)) {
+      command = token;
+      index += 1;
+    }
+    switch (command.toUpperCase()) {
+      case "M":
+      case "L":
+      case "T": {
+        const x = take();
+        point(x, take());
+        break;
+      }
+      case "H":
+        point(take(), cursor.y);
+        break;
+      case "V":
+        point(cursor.x, take());
+        break;
+      case "C": {
+        for (let control = 0; control < 2; control += 1) {
+          const cx = take();
+          xs.push(cx);
+          ys.push(take());
+        }
+        const x = take();
+        point(x, take());
+        break;
+      }
+      case "Q":
+      case "S": {
+        const cx = take();
+        xs.push(cx);
+        ys.push(take());
+        const x = take();
+        point(x, take());
+        break;
+      }
+      case "Z":
+        break;
+      default:
+        // Unknown command: stop rather than misread the rest of the path.
+        index = tokens.length;
+    }
+  }
   if (xs.length === 0 || ys.length === 0) return { x: 0, y: 0, width: 0, height: 0 };
   return grow({ x: Math.min(...xs), y: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) }, stroke);
 }

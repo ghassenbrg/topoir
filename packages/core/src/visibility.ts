@@ -1,5 +1,5 @@
 import type { Diagnostic } from "@topoir/schema";
-import { contrastRatio, isColor, MINIMUM_TEXT_CONTRAST } from "./color.js";
+import { isColor } from "./color.js";
 import type { ViewGraph } from "./ir.js";
 import type { PaintStyle, TopoIRTheme } from "./theme.js";
 
@@ -66,7 +66,6 @@ export function analyzeVisibility(view: ViewGraph, theme: TopoIRTheme): Visibili
   });
 
   const diagnostics: Diagnostic[] = [];
-  let unreadable = 0;
 
   for (const surface of surfaces) {
     for (const [channel, value] of Object.entries(surface.paint)) {
@@ -81,20 +80,11 @@ export function analyzeVisibility(view: ViewGraph, theme: TopoIRTheme): Visibili
       }
     }
 
-    const ratio = contrastRatio(surface.paint.text, surface.paint.fill);
-    if (ratio === undefined) continue;
-    if (ratio < MINIMUM_TEXT_CONTRAST) {
-      unreadable += 1;
-      diagnostics.push({
-        code: "TOP442_TEXT_NOT_LEGIBLE",
-        severity: "error",
-        message:
-          `The ${surface.role} of ${surface.owner} is drawn in ${surface.paint.text} on ${surface.paint.fill}, ` +
-          `a contrast ratio of ${ratio}:1. Text below ${MINIMUM_TEXT_CONTRAST}:1 cannot be read. ` +
-          `Change the text or fill colour for that kind.`,
-      });
-    }
+    // Contrast is not checked here. `analyzeScene` owns it, because it sees what is
+    // *actually* painted behind a glyph run — the card a label sits on, not the theme
+    // token that nominally pairs with it. Checking in both places reported every defect
+    // twice, and the theme-level answer was the less accurate of the two.
   }
 
-  return { diagnostics, metrics: { illegibleSurfaces: unreadable } };
+  return { diagnostics, metrics: { invalidColours: diagnostics.length } };
 }

@@ -3,6 +3,7 @@ import { AssetRegistry, discoverAssets } from "@topoir/assets";
 import {
   analyzeContent,
   analyzeGeometry,
+  analyzeScene,
   analyzeVisibility,
   bundledFontTextMeasurer,
   planForNode,
@@ -27,6 +28,7 @@ import {
   buildScene,
   renderPng,
   renderSvg,
+  sceneDocument,
   type PngOptions,
   type Scene,
 } from "@topoir/renderer-svg";
@@ -268,6 +270,20 @@ export class TopoIRCompiler {
       const content = analyzeContent(measured);
       diagnostics.push(...content.diagnostics);
       const scene = buildScene(measured, layout.geometry, theme, assets);
+      // Quality on the scene the reader actually receives, not on the measured boxes that
+      // preceded it. This is where a clipped glyph run, an unreadable label on its real
+      // backdrop, or a declared fact with no visible representative is caught.
+      const sceneQuality = analyzeScene(sceneDocument(scene), {
+        required: [
+          ...view.nodes.map((node) => node.id),
+          ...view.edges.map((edge) => edge.id),
+          ...view.groups.map((group) => group.id),
+          ...view.annotations.map((annotation) => annotation.id),
+        ],
+        ...(view.design?.composition === undefined ? {} : { composition: view.design.composition }),
+        background: theme.canvas.background,
+      });
+      diagnostics.push(...sceneQuality.diagnostics);
       // Plans are compiled from the placed components, so their silhouettes and
       // attachment sites describe the drawing that was actually produced.
       const incident = new Map<string, number>();
@@ -290,7 +306,7 @@ export class TopoIRCompiler {
         geometry: layout.geometry,
         scene,
         plans,
-        metrics: { ...layout.metrics, ...quality.metrics, ...content.metrics, ...visibility.metrics },
+        metrics: { ...layout.metrics, ...quality.metrics, ...content.metrics, ...visibility.metrics, ...sceneQuality.metrics },
       };
       compiledViews.push(compiled);
 

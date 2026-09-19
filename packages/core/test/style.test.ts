@@ -144,13 +144,16 @@ function view(overrides: Partial<ViewGraph> = {}): ViewGraph {
 }
 
 describe("visibility analysis", () => {
-  it("reports text that cannot be read against its own fill", () => {
+  /**
+   * Contrast moved to `analyzeScene` at T09, which sees the mark actually painted behind a
+   * glyph run rather than the theme token nominally paired with it. The equivalent
+   * assertions now live in `packages/core/test/scene-quality.test.ts`. What stays here is
+   * colour validation, which is a property of the theme itself and needs no drawing.
+   */
+  it("no longer duplicates the contrast check the scene owns", () => {
     const theme = resolveTheme({ node: { byKind: { service: { fill: "#FFFFFF", text: "#FFFFFF", stroke: "#FFFFFF" } } } });
     const report = analyzeVisibility(view(), theme);
-    const reported = report.diagnostics.filter((diagnostic) => diagnostic.code === "TOP442_TEXT_NOT_LEGIBLE");
-    expect(reported).toHaveLength(1);
-    expect(reported[0]?.severity).toBe("error");
-    expect(report.metrics.illegibleSurfaces).toBe(1);
+    expect(report.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("TOP442_TEXT_NOT_LEGIBLE");
   });
 
   it("reports a value that is not a colour", () => {

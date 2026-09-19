@@ -135,14 +135,20 @@ export function contrastRatio(foreground: string, background: string): number | 
 }
 
 /**
- * The ratio below which body text is treated as unreadable.
+ * Two different failures, deliberately separated.
  *
- * WCAG AA asks for 4.5:1 for normal text and 3:1 for large text. Diagram labels are drawn
- * at a range of sizes and over decorated fills, and the compiler is not the arbiter of a
- * designer's palette, so the gate here is the lower large-text bound: it catches paint
- * nobody can read without rejecting deliberately soft secondary text.
+ * Text at 1:1 against its own fill is *invisible*: the reader cannot know it is there, so
+ * the content is lost and that is an error. Text at 2.5:1 is *visible but hard to read*:
+ * the content survives and the failure is an accessibility one, so it is a warning. Both
+ * are worth reporting; conflating them would either let the white-on-white defect the
+ * review found pass as a warning, or declare every deliberately soft secondary label a
+ * broken diagram.
+ *
+ * `MINIMUM_TEXT_CONTRAST` is WCAG's large-text bound. `INVISIBLE_TEXT_CONTRAST` is the
+ * point below which a glyph cannot be distinguished from its background at all.
  */
 export const MINIMUM_TEXT_CONTRAST = 3;
+export const INVISIBLE_TEXT_CONTRAST = 1.5;
 
 /** The ratio below which two fills are treated as indistinguishable from one another. */
 export const MINIMUM_SHAPE_CONTRAST = 1.1;
