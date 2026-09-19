@@ -11,7 +11,28 @@ export interface Scene {
 
 export type SceneElement = SceneGroup | SceneRect | SceneCircle | ScenePath | SceneText | SceneImage;
 
+/**
+ * What in the model a mark exists for (T08).
+ *
+ * The legacy scene is a tree of anonymous primitives: once built, there is no way back
+ * from a mark to the thing that caused it, so a quality check can only reason about
+ * rectangles and an author cannot be told which relationship a defect belongs to.
+ *
+ * Ownership is carried alongside the existing fields rather than replacing them. The SVG
+ * serializer enumerates the attributes it emits, so this changes no output byte; what it
+ * enables is `sceneDocument`, which turns a built scene into a `SceneDocument` with a
+ * semantic index that can be checked in both directions — nothing required unrepresented,
+ * nothing drawn unexplained.
+ */
+export interface SceneOwner {
+  readonly kind: "occurrence" | "relationship" | "region" | "annotation" | "chrome";
+  readonly id: string;
+  /** Which part of the owner this mark is, such as `label` or `badge`. */
+  readonly part?: string;
+}
+
 export interface SceneImage {
+  readonly owner?: SceneOwner;
   readonly type: "image";
   readonly x: number;
   readonly y: number;
@@ -22,6 +43,7 @@ export interface SceneImage {
 }
 
 export interface SceneGroup {
+  readonly owner?: SceneOwner;
   readonly type: "group";
   readonly id?: string;
   readonly className?: string;
@@ -31,6 +53,7 @@ export interface SceneGroup {
 }
 
 export interface SceneRect {
+  readonly owner?: SceneOwner;
   readonly type: "rect";
   readonly id?: string;
   readonly className?: string;
@@ -47,6 +70,7 @@ export interface SceneRect {
 }
 
 export interface SceneCircle {
+  readonly owner?: SceneOwner;
   readonly type: "circle";
   readonly cx: number;
   readonly cy: number;
@@ -57,6 +81,7 @@ export interface SceneCircle {
 }
 
 export interface ScenePath {
+  readonly owner?: SceneOwner;
   readonly type: "path";
   readonly id?: string;
   readonly className?: string;
@@ -72,6 +97,7 @@ export interface ScenePath {
 }
 
 export interface SceneText {
+  readonly owner?: SceneOwner;
   readonly type: "text";
   readonly id?: string;
   readonly className?: string;

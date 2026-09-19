@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-19. This file is the live execution ledger for the design program.
 
-**Program state: in progress. M0 complete. Next task: T08 slice 2 (renderer draws from plans). Current milestone: M1 (T05–T09).**
+**Program state: in progress. M0 complete. Next task: T09. Current milestone: M1 (T05–T09).**
 
 The full review previously verified `bc64cf2`: 91 tests in 15 files passed; 240/240 synthetic cases compiled without hard geometry defects; 220/240 passed the selected defect counters; six reference candidates were deterministic with no approved parity recorded. These are historical baseline observations, not evidence that the tasks below are implemented. The design-writing task added documents/examples only.
 
@@ -18,7 +18,7 @@ Allowed task states: `not_started`, `in_progress`, `implemented_pending_gate`, `
 | T05 | M1 | complete | ComponentPlan/blocks/attachments/disposition, SceneDocument and Medium in core; renderer re-exports; three-family fixtures and dependency-direction test. Interfaces only. See session entry. |
 | T06 | M1 | complete | Font registry with face hashes, fallback chains and content-keyed caching; one resolved set reaches measurement, SVG and PNG; `TOP332_GLYPH_NOT_AVAILABLE`. See session entry. |
 | T07 | M1 | complete | Block measurement engine, bounded width negotiation, true silhouettes and ink bounds, attachment derivation, content accounting. Not yet wired into the pipeline — that is T08. See session entry. |
-| T08 | M1 | in_progress | Slice 1 done: shared silhouettes, plans compiled per view, agreement asserted. Slice 2 (renderer draws from plan blocks; chrome via the block engine; SceneDocument ownership) not started. See session entry. |
+| T08 | M1 | complete | All three acceptance criteria met and verified. `ComponentPlan.blocks` is still empty and the renderer computes block positions inline — recorded as carried work, see session entry. |
 | T09 | M1 | not_started | |
 | T10 | M2 | not_started | |
 | T11 | M2 | not_started | |
@@ -732,3 +732,72 @@ changed golden to be inspected and explained rather than re-baselined.
 **Outstanding gates.** M1 gate open; it needs T08 complete and T09.
 
 **Next ready task: T08 slice 2.**
+
+### T08 slice 2 — scene ownership and chrome on the block engine — 2026-09-20
+
+**Task: T08 — migrate renderer/templates to ComponentPlan. State: complete against its
+stated acceptance criteria, with one part of the work item explicitly carried forward.**
+
+Baseline commit `d39f685` (T08 slice 1). No unrelated worktree changes.
+
+**Acceptance criteria, all three met and verified:**
+
+| Criterion | Evidence |
+| --- | --- |
+| Geometry and drawing share attachments/silhouettes | Slice 1. `MeasuredNode.shape` is resolved once; the analyzer's `distanceToOutline` uses it; a test walks every route in three examples and checks each end against the sites that component's own plan declares |
+| Rendering has no theme-name branching | T02 removed the last `theme.id` comparison; `grep` confirms none remain |
+| Rendering has no independent wrapping | `layoutText` no longer appears in the renderer except in a comment. Title, subtitle and legend go through `measureBlock` |
+| All visible authored content has scene ownership | **Every mark across all 23 scenes in the published corpus has an owner**, asserted |
+
+**Behavior implemented in this slice.**
+
+1. **Ownership on every mark.** `SceneOwner` rides alongside the existing fields — kind, id, and the part of the owner the mark is (`label`, `badge`, `body`, `port:<id>`, `asset:<name>`, `arrow`, `label-background`, …). The SVG serializer enumerates the attributes it emits, so this changes no output byte. Ownership was not guessed at: `unowned()` walks a built scene and reports marks with no owner, and it found three real gaps on the first run — edge-label background rects, cylinder and diamond body paths, and the executive accent bar. All three are now owned, and the corpus-wide check is a test.
+
+2. **`sceneDocument()` projects the legacy scene into the V2 `SceneDocument`.** The legacy `Scene` is untouched — it is what `renderSvg` and `renderPng` consume, and changing it would change every golden. The projection adds stable primitive ids, a layer per mark derived from the group it was emitted into, real ink bounds (stroke-grown for shapes, coordinate-derived for paths) and a semantic index.
+
+3. **Coverage is now checkable in both directions.** `unowned` answers "is anything drawn that nothing explains"; `unrepresented` answers "is anything the document declares missing from the drawing" — the check no geometry counter can perform, because a drawing can be geometrically clean and simply not contain a declared fact. A test asserts every component, relationship, boundary and annotation of `checkout-platform` is indexed.
+
+4. **Chrome measured by the block engine.** The title, subtitle and legend called `layoutText` directly, a second wrapping implementation living in the renderer. They now go through `measureBlock`. The work still happens after layout — the title's wrap width depends on the final canvas width — so this is about using one measurement system, not about moving the work earlier. Equivalence was verified before switching: a probe compared `layoutText` and `measureBlock` line-for-line across six representative chrome strings and found **all line breaks and widths identical**, which is why no golden moved.
+
+**Files changed:**
+
+- `packages/renderer-svg/src/scene.ts` — `SceneOwner`, optional `owner` on every primitive
+- `packages/renderer-svg/src/component.ts` — owners on all 17 marks a component can draw
+- `packages/renderer-svg/src/build-scene.ts` — owners on boundaries, relationships, labels, annotations, legend and chrome; chrome measured by the block engine
+- `packages/renderer-svg/src/document.ts` (new) — `sceneDocument`, `unowned`
+- `packages/renderer-svg/src/index.ts` — export it
+- `packages/sdk/test/scene-ownership.test.ts` (new) — 8 assertions
+
+**Verification:**
+
+| Command | Outcome |
+| --- | --- |
+| `pnpm exec vitest run packages/sdk/test/scene-ownership.test.ts` | 8 passed |
+| `pnpm check` | build + typecheck clean; **299 tests in 27 files passed** (291 after slice 1) |
+| render comparison, after ownership | all 20 byte-identical |
+| render comparison, after chrome migration | all 20 byte-identical |
+| `pnpm benchmark:generalization` | 240 cases, 20 soft failures — unchanged |
+| unowned-mark sweep | 0 unowned marks across 23 scenes |
+
+**No golden changed in either slice of T08**, so the roadmap's "explain every changed golden"
+requirement has nothing to discharge. That is the intended outcome: this task adds a shared
+description and a stricter shared check without altering what is drawn.
+
+**Carried work, stated plainly.** The work item also says "migrate every current node/group/
+label/annotation plus title/legend to ComponentPlan; render resolved primitives only".
+`ComponentPlan.blocks` is **still an empty array**, and `nodeComponent` still computes block
+positions inline rather than placing what the plan measured. Every *acceptance criterion* is
+met — the two consumers now agree on silhouettes and attachments, there is no second
+wrapping path, and every mark is owned — but the renderer is not yet driven by plan blocks.
+
+That remaining migration is deliberately not claimed. It is a byte-fidelity-critical rewrite
+of `nodeComponent`, and doing it badly would change goldens for no behavioral gain. It is
+recorded here as the first item of the next presentation-layer slice, and `planForNode`
+carries a comment saying the same thing so it cannot be mistaken for finished.
+
+**Remaining defects.** Unchanged. Reference parity remains **0/6 unreviewed**.
+
+**Outstanding gates.** M1 gate needs T09.
+
+**Next ready task: T09** (final-scene QA and coverage). Its dependencies T08 and T03 are
+complete, and it is the task that consumes the ownership and ink bounds built here.

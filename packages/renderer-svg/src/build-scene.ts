@@ -6,7 +6,8 @@ import type {
   TopoIRTheme,
 } from "@topoir/core";
 import { AssetRegistry, artworkLicenses } from "@topoir/assets";
-import { assetReferences, bundledFontTextMeasurer, layoutText } from "@topoir/core";
+import { assetReferences, bundledFontTextMeasurer, measureBlock, measureContext } from "@topoir/core";
+import type { MeasuredText, TextStyle } from "@topoir/core";
 import { nodeComponent } from "./component.js";
 import type { Scene, SceneElement, SceneGroup, ScenePath } from "./scene.js";
 
@@ -24,11 +25,33 @@ export function buildScene(
   );
   const width = Math.max(360, geometry.bounds.width + MARGIN * 2);
   const textMeasurer = bundledFontTextMeasurer();
+  /**
+   * Page chrome is measured with the same block engine as everything else (T08).
+   *
+   * The title, subtitle and legend used to call `layoutText` here, which is a second
+   * wrapping implementation living in the renderer — the acceptance criterion for this
+   * task forbids exactly that. The work still happens after layout, because the title's
+   * wrap width depends on the final canvas width; what changed is that it is no longer a
+   * separate code path that could drift from how component text is measured.
+   */
+  const blockContext = measureContext({ measurer: textMeasurer });
+  const chrome = (id: string, text: string, style: TextStyle, maxWidth: number, maxLines: number): MeasuredText => {
+    const block = measureBlock({ type: "text", id, text, style, maxLines }, { ...blockContext, availableWidth: maxWidth });
+    if (block.type !== "text") throw new Error("chrome block must be text");
+    return {
+      lines: block.text.lines.map((line) => line.text),
+      lineHeight: block.text.lineHeight,
+      width: Math.min(maxWidth, block.bounds.width),
+      height: block.bounds.height,
+      source: block.text.source,
+      disposition: block.text.lines.map((line) => line.text.replace(/…$/u, "")).join("").length < block.text.source.replace(/\s+/gu, "").length ? "abbreviated" : "rendered",
+    };
+  };
   const titleSize = theme.language?.header === "editorial" ? 28 : 20;
-  const title = layoutText(view.title, width - MARGIN * 2, { fontSize: titleSize, fontWeight: 700, lineHeight: 1.25 }, textMeasurer, 4);
+  const title = chrome("chrome:title", view.title, { fontSize: titleSize, fontWeight: 700, lineHeight: 1.25 }, width - MARGIN * 2, 4);
   const subtitleSource = view.design?.takeaway ?? view.description;
-  const subtitle = subtitleSource ? layoutText(subtitleSource, width - MARGIN * 2, { fontSize: 13, lineHeight: 1.4 }, textMeasurer, 4) : undefined;
-  const legendItems = view.showLegend ? view.flows.map((flow) => ({ flow, text: layoutText(flow.label, Math.max(100, width - MARGIN * 2 - 48), { fontSize: 11, fontWeight: 500, lineHeight: 1.25 }, textMeasurer, 2) })) : [];
+  const subtitle = subtitleSource ? chrome("chrome:subtitle", subtitleSource, { fontSize: 13, lineHeight: 1.4 }, width - MARGIN * 2, 4) : undefined;
+  const legendItems = view.showLegend ? view.flows.map((flow) => ({ flow, text: chrome(`chrome:legend:${flow.id}`, flow.label, { fontSize: 11, fontWeight: 500, lineHeight: 1.25 }, Math.max(100, width - MARGIN * 2 - 48), 2) })) : [];
   let legendRows = legendItems.length ? 1 : 0, legendCursor = 0;
   for (const item of legendItems) { const itemWidth = item.text.width + 64; if (legendCursor > 0 && legendCursor + itemWidth > width - MARGIN * 2) { legendRows++; legendCursor = 0; } legendCursor += itemWidth; }
   const legendHeight = legendRows ? legendRows * 40 + 14 : 0;
@@ -63,9 +86,11 @@ export function buildScene(
           type: "group",
           id: `group-${safeId(group.id)}`,
           className: `topoir-group topoir-group-${group.kind}`,
+          owner: { kind: "region", id: group.id },
           children: [
             {
               type: "rect",
+              owner: { kind: "region", id: group.id, part: "boundary" },
               x: groupGeometry.x + offset.x,
               y: groupGeometry.y + offset.y,
               width: groupGeometry.width,
@@ -78,6 +103,7 @@ export function buildScene(
             },
             {
               type: "text",
+              owner: { kind: "region", id: group.id, part: "title" },
               x: groupGeometry.x + offset.x + 16,
               y: groupGeometry.y + offset.y + 26,
               lines: group.labelText.lines,
@@ -99,6 +125,7 @@ export function buildScene(
     const primary = edge.emphasis === "primary" || view.design?.story?.includes(edge.id);
     const path: ScenePath = {
       type: "path",
+      owner: { kind: "relationship", id: edge.id },
       id: `edge-${safeId(edge.id)}`,
       className: `topoir-edge topoir-edge-${edge.kind}`,
       d: roundedOrthogonalPath(edgeGeometry.points.map((point) => ({ x: point.x + offset.x, y: point.y + offset.y })), theme.language?.connectorRadius ?? 8),
@@ -111,8 +138,9 @@ export function buildScene(
     };
     const points = edgeGeometry.points.map((point) => ({ x: point.x + offset.x, y: point.y + offset.y }));
     const arrows: SceneElement[] = [];
-    if (edge.direction === "forward" || edge.direction === "both") arrows.push(arrowHead(points[points.length - 2]!, points[points.length - 1]!, color, path.strokeWidth ?? 1.8));
-    if (edge.direction === "back" || edge.direction === "both") arrows.push(arrowHead(points[1]!, points[0]!, color, path.strokeWidth ?? 1.8));
+    const owner = { kind: "relationship", id: edge.id, part: "arrow" } as const;
+    if (edge.direction === "forward" || edge.direction === "both") arrows.push({ ...arrowHead(points[points.length - 2]!, points[points.length - 1]!, color, path.strokeWidth ?? 1.8), owner });
+    if (edge.direction === "back" || edge.direction === "both") arrows.push({ ...arrowHead(points[1]!, points[0]!, color, path.strokeWidth ?? 1.8), owner });
     return [path, ...arrows];
   });
 
@@ -125,9 +153,11 @@ export function buildScene(
         type: "group",
         id: `edge-label-${safeId(edge.id)}`,
         className: "topoir-edge-label",
+        owner: { kind: "relationship", id: edge.id, part: "label" },
         children: [
           {
             type: "rect",
+            owner: { kind: "relationship", id: edge.id, part: "label-background" },
             x: label.x + offset.x,
             y: label.y + offset.y,
             width: label.width,
@@ -139,6 +169,7 @@ export function buildScene(
           },
           {
             type: "text",
+            owner: { kind: "relationship", id: edge.id, part: "label" },
             x: label.x + offset.x + label.width / 2,
             y: label.y + offset.y + 4 + theme.font.edgeLabelSize,
             lines: edge.labelText.lines,
@@ -171,9 +202,11 @@ export function buildScene(
         type: "group",
         id: `annotation-${safeId(annotation.id)}`,
         className: `topoir-annotation topoir-annotation-${annotation.kind}`,
+        owner: { kind: "annotation", id: annotation.id },
         children: [
           {
             type: "rect",
+            owner: { kind: "annotation", id: annotation.id, part: "body" },
             x: annotationGeometry.x + offset.x,
             y: annotationGeometry.y + offset.y,
             width: annotationGeometry.width,
@@ -186,6 +219,7 @@ export function buildScene(
           },
           {
             type: "text",
+            owner: { kind: "annotation", id: annotation.id, part: "text" },
             x: annotationGeometry.x + offset.x + 14,
             y: annotationGeometry.y + offset.y + 12 + theme.font.descriptionSize,
             lines: annotation.textLayout.lines,
@@ -209,6 +243,7 @@ export function buildScene(
       const color = flowColors.get(flow.id) ?? theme.edge.stroke;
       legend.push({
         type: "path",
+        owner: { kind: "chrome", id: `legend:${flow.id}`, part: "swatch" },
         d: `M${number(cursor)} ${number(baseline - 4)}H${number(cursor + 28)}`,
         fill: "none",
         stroke: color,
@@ -218,6 +253,7 @@ export function buildScene(
       });
       legend.push({
         type: "text",
+        owner: { kind: "chrome", id: `legend:${flow.id}`, part: "label" },
         x: cursor + 36,
         y: baseline,
         lines: text.lines,
@@ -243,9 +279,10 @@ export function buildScene(
       return displayed.length ? displayed.map((asset) => artworkLicenses[asset.collection] ?? `${asset.id}: ${asset.license}; source: ${asset.source}`) : ["TopoIR generic artwork: MIT"];
     }))].join("\n\n"),
     children: [
-      { type: "rect", x: 0, y: 0, width, height, fill: theme.canvas.background },
+      { type: "rect", owner: { kind: "chrome", id: "canvas" }, x: 0, y: 0, width, height, fill: theme.canvas.background },
       {
         type: "text",
+        owner: { kind: "chrome", id: "title" },
         x: MARGIN,
         y: MARGIN + titleSize,
         lines: title.lines,
@@ -254,10 +291,10 @@ export function buildScene(
         fontSize: titleSize,
         fontWeight: 700,
       },
-      ...(subtitle === undefined ? [] : [{ type: "text" as const, x: MARGIN, y: MARGIN + title.height + 23, lines: subtitle.lines, lineHeight: subtitle.lineHeight, fill: theme.canvas.muted, fontSize: 13 }]),
-      ...(theme.language?.header === "rule" || theme.language?.header === "editorial" ? [{ type: "path" as const, d: `M${MARGIN} ${offset.y - 14}H${width - MARGIN}`, stroke: theme.group.default.stroke, strokeWidth: 1 }] : []),
+      ...(subtitle === undefined ? [] : [{ type: "text" as const, owner: { kind: "chrome" as const, id: "subtitle" }, x: MARGIN, y: MARGIN + title.height + 23, lines: subtitle.lines, lineHeight: subtitle.lineHeight, fill: theme.canvas.muted, fontSize: 13 }]),
+      ...(theme.language?.header === "rule" || theme.language?.header === "editorial" ? [{ type: "path" as const, owner: { kind: "chrome" as const, id: "header-rule" }, d: `M${MARGIN} ${offset.y - 14}H${width - MARGIN}`, stroke: theme.group.default.stroke, strokeWidth: 1 }] : []),
       { type: "group", id: "groups", children: groups },
-      ...(view.design?.composition === "sequence" ? [{ type: "group" as const, id: "lifelines", children: geometry.nodes.map((node) => ({ type: "path" as const, d: `M${node.x + node.width / 2 + offset.x} ${node.y + node.height + offset.y}V${geometry.bounds.height + offset.y - 16}`, stroke: theme.group.default.stroke, strokeWidth: 1.2, dash: "5 6" })) }] : []),
+      ...(view.design?.composition === "sequence" ? [{ type: "group" as const, id: "lifelines", children: geometry.nodes.map((node) => ({ type: "path" as const, owner: { kind: "occurrence" as const, id: node.id, part: "lifeline" }, d: `M${node.x + node.width / 2 + offset.x} ${node.y + node.height + offset.y}V${geometry.bounds.height + offset.y - 16}`, stroke: theme.group.default.stroke, strokeWidth: 1.2, dash: "5 6" })) }] : []),
       { type: "group", id: "edges", children: edgePaths },
       { type: "group", id: "nodes", children: nodes },
       { type: "group", id: "edge-labels", children: edgeLabels },
