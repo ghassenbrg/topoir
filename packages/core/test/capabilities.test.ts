@@ -46,9 +46,42 @@ describe("capability registry", () => {
     }
   });
 
-  it("uses unique ids", () => {
-    const ids = capabilities().map((capability) => capability.id);
-    expect(new Set(ids).size).toBe(ids.length);
+  it("uses unique ids within each kind", () => {
+    // Uniqueness is per kind, not global. `architecture` is both a *family* — the semantic
+    // model of components and their relationships — and a *composition* — the layout
+    // strategy that arranges one. They are genuinely different things that share a name,
+    // so a caller asks for one by kind, and a global-uniqueness rule would be wrong.
+    for (const kind of ["composition", "intent", "style", "format", "family", "language"] as const) {
+      const ids = capabilitiesOfKind(kind).map((capability) => capability.id);
+      expect(new Set(ids).size, kind).toBe(ids.length);
+    }
+  });
+
+  it("distinguishes the architecture family from the architecture composition", () => {
+    const family = capabilitiesOfKind("family").find((capability) => capability.id === "architecture");
+    const composition = capabilitiesOfKind("composition").find((capability) => capability.id === "architecture");
+    expect(family).toBeDefined();
+    expect(composition).toBeDefined();
+    expect(family?.summary).not.toBe(composition?.summary);
+  });
+
+  it("reports every document language the build accepts, with its real status", () => {
+    const languages = capabilitiesOfKind("language");
+    expect(languages.map((capability) => capability.id)).toEqual(["topoir.dev/v1alpha1", "topoir.dev/v1alpha2"]);
+    // v1alpha1 compiles; v1alpha2 validates structurally and does not yet compile. Saying
+    // both are implemented would be exactly the dishonesty T04 removed.
+    expect(languages[0]?.maturity).toBe("implemented");
+    expect(languages[1]?.maturity).toBe("experimental");
+  });
+
+  it("reports a reserved-but-unimplemented family as unsupported", () => {
+    const families = capabilitiesOfKind("family");
+    expect(families.find((capability) => capability.id === "architecture")?.maturity).toBe("implemented");
+    for (const id of ["process", "interaction"]) {
+      const family = families.find((capability) => capability.id === id);
+      expect(family?.maturity, id).toBe("unsupported");
+      expect(family?.plannedIn, id).toMatch(/^T\d\d$/u);
+    }
   });
 });
 

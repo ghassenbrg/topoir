@@ -40,6 +40,9 @@ Do not parse message wording. Match `code`, then use `path` and `range` to edit 
 
 | Code | Repair |
 | --- | --- |
+| `TOP103_UNSUPPORTED_API_VERSION` | The document's `apiVersion` or `kind` is not one this loader accepts. `topoir.dev/v1alpha1`/`Architecture` and `topoir.dev/v1alpha2`/`DiagramWorkspace` are separate languages with separate loaders |
+| `TOP104_UNKNOWN_FAMILY` | The model names a diagram family that does not exist. The message lists the families this build accepts |
+| `TOP105_FAMILY_NOT_IMPLEMENTED` | The family is reserved but has no body schema in this build, so the document is rejected rather than compiling to nothing. The message names the task that will implement it |
 | `TOP251_DESIGN_REFERENCE_NOT_FOUND` | Correct the focus node or story edge ID |
 | `TOP252_INTENT_NOT_APPLIED` | The view declares intent this build accepts but does not execute, so the drawing does not reflect it. The message names the view and the specific intent. Run `topoir capabilities` to see what each intent's maturity actually is |
 | `TOP320_ASSET_DIRECTORY_INVALID` | Configure an existing readable asset directory |

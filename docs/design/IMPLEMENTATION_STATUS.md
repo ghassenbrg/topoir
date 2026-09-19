@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-19. This file is the live execution ledger for the design program.
 
-**Program state: in progress. M0 and M1 complete. Next task: T10. Current milestone: M2 (T10–T15).**
+**Program state: in progress. M0 and M1 complete. Next task: T11. Current milestone: M2 (T10–T15).**
 
 The full review previously verified `bc64cf2`: 91 tests in 15 files passed; 240/240 synthetic cases compiled without hard geometry defects; 220/240 passed the selected defect counters; six reference candidates were deterministic with no approved parity recorded. These are historical baseline observations, not evidence that the tasks below are implemented. The design-writing task added documents/examples only.
 
@@ -20,7 +20,7 @@ Allowed task states: `not_started`, `in_progress`, `implemented_pending_gate`, `
 | T07 | M1 | complete | Block measurement engine, bounded width negotiation, true silhouettes and ink bounds, attachment derivation, content accounting. Not yet wired into the pipeline — that is T08. See session entry. |
 | T08 | M1 | complete | All acceptance criteria met. Carried work closed: `contentLayout` is the single placement computation, plans carry populated blocks, and the renderer derives nothing itself. |
 | T09 | M1 | complete | Scene QA on final ink: representation, attribution, clipping, real-backdrop contrast, disposition. Found 10 genuinely defective generated cases nothing had reported. See session entry. |
-| T10 | M2 | not_started | |
+| T10 | M2 | complete | v1alpha2 envelope, family registry, generated types with a drift test. Structural validation only — it does not compile yet, and discovery says so. See session entry. |
 | T11 | M2 | not_started | |
 | T12 | M2 | not_started | |
 | T13 | M2 | not_started | |
@@ -979,3 +979,60 @@ No human visual review has been obtained. `--require-parity` fails, correctly.
 
 **Next ready task: T10** (v1alpha2 envelope and family registry), which opens M2. Its
 dependencies T04 and T05 are complete.
+
+### T10 — v1alpha2 envelope and family registry — 2026-09-20
+
+**Task: T10 — v1alpha2 envelope and family registry. State: complete.**
+
+Baseline commit `dea003f`. No unrelated worktree changes.
+
+**Scope, stated first so the claim is not read wider than it is.** This adds a second
+document *language* with full structural validation. It does **not** compile: the compiler
+still only builds diagrams from `v1alpha1`. `topoir capabilities` reports
+`topoir.dev/v1alpha2` as `experimental` with `plannedIn: T11` for exactly that reason, and
+a test asserts it is not reported as implemented.
+
+**Behavior implemented.**
+
+1. **The workspace envelope** (`packages/schema/schema/topoir.v1alpha2.schema.json`). `DiagramWorkspace` with `sources`, `entities`, `models`, `styles`, `views` and `viewSets`. Models carry a `family` discriminant selecting the body schema. Views carry `projection` (include/exclude, `edgePolicy`, collapse, explicit occurrences, connection bindings) and `presentation` (intent, medium, style, composition, constraints, content policy). The family-body vocabulary is reused from v1alpha1 unchanged; only the envelope, identity, projection and presentation layers are new.
+
+2. **The family registry** (`packages/schema/src/families.ts`). `architecture` is `supported`; `process` and `interaction` are `planned` — reserved, with no body schema, and **rejected**. That is the point: a family with no body schema cannot produce a useful diagram, and accepting the document would return an empty result for something an author reasonably expects to work. A test asserts the schema's discriminated-union branches and the registry's accepted list match **in both directions**.
+
+3. **Two checks run before the schema**, because JSON Schema's own messages for them are useless. An unsupported `apiVersion` otherwise reports "must be equal to constant"; an unimplemented family reports "must match exactly one schema in oneOf". `TOP103`, `TOP104` and `TOP105` say what is wrong, what is accepted, and which task will deliver what is missing.
+
+4. **Generated authoring types with a real drift test.** `packages/schema/scripts/generate-workspace-types.mts` emits `src/workspace-types.ts` from the schema; `pnpm --filter @topoir/schema generate` refreshes it; a test regenerates in memory and fails if the file differs. Verified load-bearing by adding a property to the schema without regenerating — the test failed — then reverting. The types are exported namespaced as `v1alpha2` because `Direction`, `NodeVisual`, `DesignTokens` and `GroupLayout` exist in both languages; they are the same shapes today, but they are separate wire contracts and merging them would let a v1alpha1 change silently alter v1alpha2.
+
+5. **Discovery reports both languages and all three families** with their real status, derived from the schema registry rather than restated.
+
+**A real ambiguity the tests surfaced.** `architecture` is both a *family* (the semantic
+model) and a *composition* (the layout strategy that arranges one). The capability registry
+asserted globally unique ids and failed. The correct invariant is uniqueness **per kind** —
+a caller asks for a composition or a family, not for a bare name — so the assertion was
+corrected to state that, with a further test asserting the two entries are genuinely
+different. This is a corrected invariant, not a relaxed one: the original rule was wrong.
+
+**Files added:** the v1alpha2 schema, `src/families.ts`, `src/workspace.ts`,
+`src/workspace-types.ts` (generated), `scripts/generate-workspace-types.mts`,
+`test/workspace.test.ts` (25 assertions), `fixtures/workspace/` (3 documents + README).
+**Changed:** `src/index.ts`, `src/diagnostics.ts` (`TOP103`–`TOP105`),
+`core/src/capabilities.ts`, `core/test/capabilities.test.ts`, `docs/diagnostics.md`.
+
+**Verification:**
+
+| Command | Outcome |
+| --- | --- |
+| `pnpm exec vitest run packages/schema/test/workspace.test.ts` | 25 passed |
+| `pnpm check` | build + typecheck clean; **351 tests in 29 files passed** (323 after M1) |
+| drift probe | adding a schema property without regenerating fails the drift test |
+| `topoir capabilities` | both languages and all three families listed with real maturity |
+
+**Acceptance:**
+
+- *Supplied target examples validate structurally once their body schemas land* — the architecture example validates with zero diagnostics; process and interaction are rejected with `TOP105` naming T21 and T23, which is the correct state until those bodies exist.
+- *Unsupported family/version fails clearly* — `TOP103`/`TOP104`/`TOP105`, each naming what is accepted.
+- *Generated types and runtime schema cannot drift* — regeneration test, verified load-bearing.
+
+**Remaining defects.** Unchanged from T09. Reference parity remains **0/6 unreviewed**.
+
+**Next ready task: T11** (identities, projection, collapse and migration), which turns the
+validated envelope into something the compiler can build from.

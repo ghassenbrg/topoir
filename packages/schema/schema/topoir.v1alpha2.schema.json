@@ -1,0 +1,1692 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://topoir.dev/schema/v1alpha2.json",
+  "title": "TopoIR DiagramWorkspace v1alpha2",
+  "description": "The target workspace envelope. A workspace holds reusable entities, one or more family models, and views that project a model for a purpose. Only families this build implements are accepted; an unimplemented family is rejected rather than silently producing nothing.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "models",
+    "views"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "topoir.dev/v1alpha2"
+    },
+    "kind": {
+      "const": "DiagramWorkspace"
+    },
+    "metadata": {
+      "$ref": "#/$defs/metadata"
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/entity"
+      }
+    },
+    "models": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/model"
+      }
+    },
+    "styles": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/style"
+      }
+    },
+    "views": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/workspaceView"
+      }
+    },
+    "viewSets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/viewSet"
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/id"
+      },
+      "uniqueItems": true
+    },
+    "color": {
+      "type": "string",
+      "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+    },
+    "paint": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fill": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+        },
+        "stroke": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+        },
+        "text": {
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+        }
+      }
+    },
+    "direction": {
+      "enum": [
+        "right",
+        "left",
+        "down",
+        "up"
+      ]
+    },
+    "metadata": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/id"
+        },
+        "title": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "labels": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/id"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      },
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false
+    },
+    "node": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "kind": {
+          "enum": [
+            "client",
+            "service",
+            "api",
+            "worker",
+            "database",
+            "cache",
+            "queue",
+            "stream",
+            "object-storage",
+            "filesystem",
+            "gateway",
+            "load-balancer",
+            "firewall",
+            "identity-provider",
+            "vm",
+            "container",
+            "pod",
+            "kubernetes-service",
+            "function",
+            "cloud-service",
+            "external-system",
+            "generic"
+          ]
+        },
+        "group": {
+          "$ref": "#/$defs/id"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "technology": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "icon": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+:[A-Za-z0-9_./-]+$"
+        },
+        "tags": {
+          "$ref": "#/$defs/tags"
+        },
+        "order": {
+          "type": "integer",
+          "minimum": -100000,
+          "maximum": 100000
+        },
+        "visual": {
+          "$ref": "#/$defs/nodeVisual"
+        },
+        "ports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/port"
+          }
+        },
+        "entity": {
+          "$ref": "#/$defs/id"
+        },
+        "provenance": {
+          "$ref": "#/$defs/provenance"
+        }
+      },
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false
+    },
+    "nodeVisual": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "shape": {
+          "enum": [
+            "auto",
+            "card",
+            "icon",
+            "cylinder",
+            "stack",
+            "pill",
+            "diamond",
+            "image"
+          ]
+        },
+        "emphasis": {
+          "enum": [
+            "primary",
+            "secondary",
+            "muted"
+          ]
+        },
+        "status": {
+          "enum": [
+            "normal",
+            "success",
+            "failure",
+            "warning"
+          ]
+        },
+        "badge": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 48
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9999
+        },
+        "asset": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "assets": {
+          "type": "array",
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "portLabels": {
+          "enum": [
+            "hidden",
+            "inside"
+          ]
+        }
+      }
+    },
+    "port": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "side": {
+          "enum": [
+            "north",
+            "east",
+            "south",
+            "west",
+            "auto"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "input",
+            "output",
+            "bidirectional"
+          ]
+        },
+        "protocol": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "order": {
+          "type": "integer"
+        }
+      },
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false
+    },
+    "group": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "kind": {
+          "enum": [
+            "system",
+            "environment",
+            "cloud",
+            "region",
+            "zone",
+            "network",
+            "vpc",
+            "subnet",
+            "kubernetes-cluster",
+            "namespace",
+            "deployment",
+            "security-boundary",
+            "external-zone",
+            "logical"
+          ]
+        },
+        "parent": {
+          "$ref": "#/$defs/id"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "technology": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "icon": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+:[A-Za-z0-9_./-]+$"
+        },
+        "tags": {
+          "$ref": "#/$defs/tags"
+        },
+        "order": {
+          "type": "integer",
+          "minimum": -100000,
+          "maximum": 100000
+        },
+        "layout": {
+          "$ref": "#/$defs/groupLayout"
+        },
+        "visual": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fill": {
+              "type": "string",
+              "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+            },
+            "stroke": {
+              "type": "string",
+              "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+            },
+            "text": {
+              "type": "string",
+              "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+            },
+            "emphasis": {
+              "enum": [
+                "primary",
+                "secondary",
+                "muted"
+              ]
+            }
+          }
+        },
+        "entity": {
+          "$ref": "#/$defs/id"
+        },
+        "provenance": {
+          "$ref": "#/$defs/provenance"
+        }
+      },
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false
+    },
+    "groupLayout": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "enum": [
+            "auto",
+            "layered",
+            "row",
+            "column",
+            "grid",
+            "pack"
+          ]
+        },
+        "direction": {
+          "$ref": "#/$defs/direction"
+        },
+        "columns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "gap": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 512
+        }
+      },
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false
+    },
+    "edge": {
+      "type": "object",
+      "required": [
+        "id",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "from": {
+          "$ref": "#/$defs/id"
+        },
+        "to": {
+          "$ref": "#/$defs/id"
+        },
+        "sourcePort": {
+          "$ref": "#/$defs/id"
+        },
+        "targetPort": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "protocol": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "kind": {
+          "enum": [
+            "request",
+            "response",
+            "read",
+            "write",
+            "publish",
+            "consume",
+            "replicate",
+            "authenticate",
+            "authorize",
+            "stream",
+            "sync",
+            "async",
+            "control",
+            "data",
+            "dependency",
+            "network"
+          ]
+        },
+        "flow": {
+          "$ref": "#/$defs/id"
+        },
+        "emphasis": {
+          "enum": [
+            "primary",
+            "secondary",
+            "muted"
+          ]
+        },
+        "status": {
+          "enum": [
+            "normal",
+            "success",
+            "failure",
+            "warning"
+          ]
+        },
+        "step": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 999
+        },
+        "direction": {
+          "enum": [
+            "forward",
+            "back",
+            "both",
+            "none"
+          ]
+        },
+        "style": {
+          "enum": [
+            "solid",
+            "dashed",
+            "dotted"
+          ]
+        },
+        "tags": {
+          "$ref": "#/$defs/tags"
+        },
+        "order": {
+          "type": "integer",
+          "minimum": -100000,
+          "maximum": 100000
+        },
+        "provenance": {
+          "$ref": "#/$defs/provenance"
+        }
+      },
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false
+    },
+    "flow": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$"
+        },
+        "style": {
+          "enum": [
+            "solid",
+            "dashed",
+            "dotted"
+          ]
+        },
+        "order": {
+          "type": "integer",
+          "minimum": -100000,
+          "maximum": 100000
+        }
+      },
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false
+    },
+    "annotation": {
+      "type": "object",
+      "required": [
+        "id",
+        "text"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "enum": [
+            "note",
+            "warning",
+            "callout"
+          ]
+        },
+        "text": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "anchor": {
+          "$ref": "#/$defs/id"
+        },
+        "tags": {
+          "$ref": "#/$defs/tags"
+        },
+        "order": {
+          "type": "integer",
+          "minimum": -100000,
+          "maximum": 100000
+        },
+        "visual": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fill": {
+              "type": "string",
+              "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+            },
+            "stroke": {
+              "type": "string",
+              "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+            },
+            "text": {
+              "type": "string",
+              "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+            }
+          }
+        }
+      },
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false
+    },
+    "designTokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Design tokens for this view. Every field overrides the base named by `extends`.",
+      "properties": {
+        "extends": {
+          "$ref": "#/$defs/id"
+        },
+        "language": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "component": {
+              "enum": [
+                "card",
+                "icon",
+                "architectural",
+                "sketch"
+              ]
+            },
+            "header": {
+              "enum": [
+                "plain",
+                "editorial",
+                "rule"
+              ]
+            },
+            "boundaries": {
+              "enum": [
+                "panel",
+                "outline",
+                "rail"
+              ]
+            },
+            "connectorRadius": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 48
+            },
+            "depth": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 24
+            },
+            "iconSize": {
+              "type": "number",
+              "minimum": 8,
+              "maximum": 160
+            }
+          }
+        },
+        "font": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "family": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "labelSize": {
+              "type": "number",
+              "minimum": 6,
+              "maximum": 48
+            },
+            "descriptionSize": {
+              "type": "number",
+              "minimum": 6,
+              "maximum": 36
+            },
+            "groupTitleSize": {
+              "type": "number",
+              "minimum": 6,
+              "maximum": 48
+            },
+            "edgeLabelSize": {
+              "type": "number",
+              "minimum": 6,
+              "maximum": 36
+            },
+            "lineHeight": {
+              "type": "number",
+              "minimum": 0.8,
+              "maximum": 2.5
+            }
+          }
+        },
+        "canvas": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "background": {
+              "type": "string",
+              "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+            },
+            "foreground": {
+              "type": "string",
+              "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+            },
+            "muted": {
+              "type": "string",
+              "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+            }
+          }
+        },
+        "spacing": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "nodePaddingX": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 96
+            },
+            "nodePaddingY": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 96
+            },
+            "groupPadding": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 160
+            },
+            "groupTitleHeight": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 160
+            },
+            "layerGap": {
+              "type": "number",
+              "minimum": 8,
+              "maximum": 400
+            },
+            "nodeGap": {
+              "type": "number",
+              "minimum": 4,
+              "maximum": 300
+            }
+          }
+        },
+        "node": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "minWidth": {
+              "type": "number",
+              "minimum": 24,
+              "maximum": 800
+            },
+            "minHeight": {
+              "type": "number",
+              "minimum": 16,
+              "maximum": 600
+            },
+            "maxTextWidth": {
+              "type": "number",
+              "minimum": 40,
+              "maximum": 800
+            },
+            "radius": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 80
+            },
+            "iconSize": {
+              "type": "number",
+              "minimum": 8,
+              "maximum": 160
+            },
+            "default": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "fill": {
+                  "type": "string",
+                  "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+                },
+                "stroke": {
+                  "type": "string",
+                  "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+                },
+                "text": {
+                  "type": "string",
+                  "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+                }
+              }
+            },
+            "byKind": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "fill": {
+                    "type": "string",
+                    "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+                  },
+                  "stroke": {
+                    "type": "string",
+                    "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+                  },
+                  "text": {
+                    "type": "string",
+                    "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "group": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "radius": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 80
+            },
+            "default": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "fill": {
+                  "type": "string",
+                  "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+                },
+                "stroke": {
+                  "type": "string",
+                  "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+                },
+                "text": {
+                  "type": "string",
+                  "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+                }
+              }
+            },
+            "byKind": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "fill": {
+                    "type": "string",
+                    "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+                  },
+                  "stroke": {
+                    "type": "string",
+                    "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+                  },
+                  "text": {
+                    "type": "string",
+                    "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "edge": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "stroke": {
+              "type": "string",
+              "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+            },
+            "labelBackground": {
+              "type": "string",
+              "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+            },
+            "labelText": {
+              "type": "string",
+              "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+            },
+            "width": {
+              "type": "number",
+              "minimum": 0.5,
+              "maximum": 12
+            },
+            "byKind": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+              }
+            },
+            "palette": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "items": {
+                "type": "string",
+                "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+              }
+            }
+          }
+        },
+        "annotation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "note": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "fill": {
+                  "type": "string",
+                  "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+                },
+                "stroke": {
+                  "type": "string",
+                  "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+                },
+                "text": {
+                  "type": "string",
+                  "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+                }
+              }
+            },
+            "warning": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "fill": {
+                  "type": "string",
+                  "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+                },
+                "stroke": {
+                  "type": "string",
+                  "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+                },
+                "text": {
+                  "type": "string",
+                  "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+                }
+              }
+            },
+            "callout": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "fill": {
+                  "type": "string",
+                  "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+                },
+                "stroke": {
+                  "type": "string",
+                  "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+                },
+                "text": {
+                  "type": "string",
+                  "pattern": "^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model",
+        "element"
+      ],
+      "properties": {
+        "model": {
+          "$ref": "#/$defs/id"
+        },
+        "element": {
+          "$ref": "#/$defs/id"
+        }
+      },
+      "description": "A cross-model element reference. Local family references are plain element IDs."
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "locator"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "enum": [
+            "repository",
+            "manifest",
+            "trace",
+            "document",
+            "conversation",
+            "other"
+          ]
+        },
+        "locator": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "revision": {
+          "type": "string"
+        },
+        "contentHash": {
+          "type": "string"
+        }
+      },
+      "description": "Metadata only. The compiler never fetches a source."
+    },
+    "provenance": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source",
+          "relation"
+        ],
+        "properties": {
+          "source": {
+            "$ref": "#/$defs/id"
+          },
+          "pointer": {
+            "type": "string"
+          },
+          "relation": {
+            "enum": [
+              "observed",
+              "inferred",
+              "assumed"
+            ]
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "How a fact came to be known. Observed, inferred and assumed are kept distinct."
+    },
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "label"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "label": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "description": {
+          "type": "string"
+        },
+        "tags": {
+          "$ref": "#/$defs/tags"
+        },
+        "provenance": {
+          "$ref": "#/$defs/provenance"
+        }
+      },
+      "description": "A reusable real-world thing. One entity can appear in several models in different roles."
+    },
+    "architectureBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/group"
+          }
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/node"
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/edge"
+          }
+        },
+        "flows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/flow"
+          }
+        },
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/annotation"
+          }
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "required": [
+        "id",
+        "family",
+        "body"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "familyVersion": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "id": true,
+            "familyVersion": true,
+            "title": true,
+            "description": true,
+            "family": {
+              "const": "architecture"
+            },
+            "body": {
+              "$ref": "#/$defs/architectureBody"
+            }
+          }
+        }
+      ],
+      "description": "A model's body is selected by its family. Only families this build implements are accepted."
+    },
+    "projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "include": {
+          "$ref": "#/$defs/projectionSelector"
+        },
+        "exclude": {
+          "$ref": "#/$defs/projectionSelector"
+        },
+        "edgePolicy": {
+          "enum": [
+            "induced",
+            "exact"
+          ],
+          "description": "induced adds relationships between visible endpoints; exact retains only what was selected and never adds one."
+        },
+        "ancestorPolicy": {
+          "enum": [
+            "retain",
+            "summarize"
+          ]
+        },
+        "collapse": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "element",
+              "mode"
+            ],
+            "properties": {
+              "element": {
+                "$ref": "#/$defs/id"
+              },
+              "mode": {
+                "const": "summary"
+              },
+              "label": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "occurrences": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "element"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "element": {
+                "$ref": "#/$defs/id"
+              },
+              "role": {
+                "enum": [
+                  "primary",
+                  "detail",
+                  "repeated"
+                ]
+              },
+              "label": {
+                "type": "string"
+              },
+              "detail": {
+                "enum": [
+                  "minimal",
+                  "standard",
+                  "full"
+                ]
+              }
+            }
+          }
+        },
+        "connections": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "relationship"
+            ],
+            "properties": {
+              "relationship": {
+                "$ref": "#/$defs/id"
+              },
+              "from": {
+                "$ref": "#/$defs/id"
+              },
+              "to": {
+                "$ref": "#/$defs/id"
+              }
+            }
+          },
+          "description": "Required when a relationship endpoint has more than one candidate occurrence."
+        }
+      }
+    },
+    "projectionSelector": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "elements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "tags": {
+          "$ref": "#/$defs/tags"
+        }
+      }
+    },
+    "medium": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "page",
+            "slide",
+            "canvas",
+            "screen"
+          ]
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "padding": {
+          "type": "number",
+          "minimum": 0
+        },
+        "minTextSize": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "fit": {
+          "enum": [
+            "contain",
+            "paginate"
+          ]
+        },
+        "dpi": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "description": "Legibility is a property of a drawing at a size, so the size is declared."
+    },
+    "constraint": {
+      "type": "object",
+      "required": [
+        "id",
+        "type"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "strength": {
+          "enum": [
+            "required",
+            "preferred"
+          ]
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        }
+      },
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "id": true,
+            "strength": true,
+            "priority": true,
+            "type": {
+              "const": "order"
+            },
+            "items": {
+              "type": "array",
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/id"
+              }
+            },
+            "axis": {
+              "enum": [
+                "x",
+                "y"
+              ]
+            }
+          },
+          "required": [
+            "items"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "id": true,
+            "strength": true,
+            "priority": true,
+            "type": {
+              "const": "place-relative"
+            },
+            "subject": {
+              "$ref": "#/$defs/id"
+            },
+            "reference": {
+              "$ref": "#/$defs/id"
+            },
+            "side": {
+              "enum": [
+                "above",
+                "below",
+                "left",
+                "right"
+              ]
+            },
+            "gap": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "subject",
+            "reference",
+            "side"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "id": true,
+            "strength": true,
+            "priority": true,
+            "type": {
+              "const": "align"
+            },
+            "items": {
+              "type": "array",
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/id"
+              }
+            },
+            "axis": {
+              "enum": [
+                "x",
+                "y"
+              ]
+            }
+          },
+          "required": [
+            "items",
+            "axis"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "id": true,
+            "strength": true,
+            "priority": true,
+            "type": {
+              "const": "group"
+            },
+            "items": {
+              "type": "array",
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/id"
+              }
+            }
+          },
+          "required": [
+            "items"
+          ]
+        }
+      ],
+      "description": "A required constraint that cannot be satisfied is an error, not a preference that was outvoted."
+    },
+    "presentation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "intent": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "question": {
+              "type": "string"
+            },
+            "audience": {
+              "enum": [
+                "engineering",
+                "executive",
+                "presentation",
+                "learning"
+              ]
+            },
+            "takeaway": {
+              "type": "string"
+            },
+            "focus": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/id"
+              }
+            },
+            "story": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/id"
+              }
+            }
+          }
+        },
+        "medium": {
+          "$ref": "#/$defs/medium"
+        },
+        "style": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "pack": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "variant": {
+              "type": "string"
+            },
+            "tokens": {
+              "$ref": "#/$defs/designTokens"
+            }
+          }
+        },
+        "composition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "strategy": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "candidates": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 12
+            },
+            "direction": {
+              "$ref": "#/$defs/direction"
+            }
+          }
+        },
+        "constraints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/constraint"
+          }
+        },
+        "contentPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "detail": {
+              "enum": [
+                "minimal",
+                "standard",
+                "full"
+              ]
+            },
+            "required": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "element"
+                ],
+                "properties": {
+                  "element": {
+                    "$ref": "#/$defs/id"
+                  },
+                  "field": {
+                    "type": "string"
+                  }
+                }
+              },
+              "description": "Content that may never be omitted or abbreviated to make a diagram fit."
+            }
+          }
+        }
+      }
+    },
+    "workspaceView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "model"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "model": {
+          "$ref": "#/$defs/id"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "showLegend": {
+          "type": "boolean"
+        },
+        "projection": {
+          "$ref": "#/$defs/projection"
+        },
+        "presentation": {
+          "$ref": "#/$defs/presentation"
+        }
+      }
+    },
+    "style": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "tokens"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "extends": {
+          "$ref": "#/$defs/id"
+        },
+        "tokens": {
+          "$ref": "#/$defs/designTokens"
+        }
+      }
+    },
+    "viewSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "views"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "views": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "title": {
+          "type": "string"
+        },
+        "sharedStyle": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    }
+  }
+}

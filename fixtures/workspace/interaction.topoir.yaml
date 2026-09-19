@@ -1,0 +1,101 @@
+# Target v1alpha2 design example; not accepted by the current compiler.
+apiVersion: topoir.dev/v1alpha2
+kind: DiagramWorkspace
+metadata:
+  name: inventory-check
+entities:
+  - id: checkout
+    kind: software.service
+    label: Checkout API
+models:
+  - id: request
+    family: interaction
+    body:
+      participants:
+        - id: browser
+          kind: actor
+          label: Browser
+        - id: api
+          kind: service
+          entity: checkout
+        - id: inventory
+          kind: service
+          label: Inventory service
+      events:
+        - id: order
+          type: message
+          from: browser
+          to: api
+          label: Submit order
+          mode: sync
+        - id: begin-api
+          type: activate
+          participant: api
+        - id: check
+          type: message
+          from: api
+          to: inventory
+          label: Check availability
+          mode: sync
+        - id: result
+          type: fragment
+          operator: alt
+          branches:
+            - id: available
+              label: Stock available
+              events:
+                - id: stock-ok
+                  type: message
+                  from: inventory
+                  to: api
+                  label: Available
+                  mode: return
+                  replyTo: check
+                - id: accepted
+                  type: message
+                  from: api
+                  to: browser
+                  label: Order accepted
+                  mode: return
+                  replyTo: order
+            - id: unavailable
+              label: Out of stock
+              events:
+                - id: stock-empty
+                  type: message
+                  from: inventory
+                  to: api
+                  label: Unavailable
+                  mode: return
+                  replyTo: check
+                - id: declined
+                  type: message
+                  from: api
+                  to: browser
+                  label: Order declined
+                  mode: return
+                  replyTo: order
+        - id: end-api
+          type: deactivate
+          participant: api
+views:
+  - id: sequence
+    model: request
+    title: Inventory determines the order response
+    presentation:
+      intent:
+        question: How does an availability result change the response?
+        audience: engineering
+        focus: [api]
+      medium:
+        kind: slide
+        width: 1600
+        height: 900
+        padding: 48
+        minTextSize: 16
+        fit: contain
+      composition:
+        strategy: interaction-events
+      style:
+        pack: technical-clean
+        variant: light

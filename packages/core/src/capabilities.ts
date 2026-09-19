@@ -1,4 +1,4 @@
-import { topoirSchema } from "@topoir/schema";
+import { DIAGRAM_FAMILIES, topoirSchema, WORKSPACE_API_VERSION } from "@topoir/schema";
 import type { Diagnostic } from "@topoir/schema";
 import type { ViewGraph } from "./ir.js";
 import { themes } from "./theme.js";
@@ -32,7 +32,7 @@ export type Maturity = "implemented" | "experimental" | "advisory" | "unsupporte
 
 export interface Capability {
   readonly id: string;
-  readonly kind: "composition" | "intent" | "style" | "format";
+  readonly kind: "composition" | "intent" | "style" | "format" | "family" | "language";
   readonly maturity: Maturity;
   readonly summary: string;
   /** The task that will implement this, for anything not yet `implemented`. */
@@ -95,9 +95,46 @@ const FORMATS: readonly Capability[] = [
   { id: "png", kind: "format", maturity: "implemented", summary: "Raster output at a requested scale, with logical and pixel dimensions reported separately." },
 ];
 
+/**
+ * Diagram families, from the schema's own registry.
+ *
+ * Derived rather than restated: a family reserved in the schema but not implemented must
+ * appear here with that status, or discovery would advertise something the validator
+ * rejects.
+ */
+function families(): readonly Capability[] {
+  return DIAGRAM_FAMILIES.map((family): Capability => ({
+    id: family.id,
+    kind: "family",
+    maturity: family.maturity === "supported" ? "implemented" : family.maturity === "experimental" ? "experimental" : "unsupported",
+    summary: family.summary,
+    ...(family.plannedIn === undefined ? {} : { plannedIn: family.plannedIn }),
+  }));
+}
+
+/** The document languages this build accepts. */
+const LANGUAGES: readonly Capability[] = [
+  {
+    id: "topoir.dev/v1alpha1",
+    kind: "language",
+    maturity: "implemented",
+    summary: "The Architecture document. Fully supported; it is what every published example is written in.",
+  },
+  {
+    id: WORKSPACE_API_VERSION,
+    kind: "language",
+    maturity: "experimental",
+    summary:
+      "The DiagramWorkspace envelope: reusable entities, several family models, and views that project a model for a purpose. Structural validation only so far — it does not yet compile.",
+    plannedIn: "T11",
+  },
+];
+
 /** Every capability this build exposes, in a stable order. */
 export function capabilities(): readonly Capability[] {
   return [
+    ...LANGUAGES,
+    ...families(),
     ...COMPOSITIONS,
     ...INTENTS,
     ...FORMATS,
