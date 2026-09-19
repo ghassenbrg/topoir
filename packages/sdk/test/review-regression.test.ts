@@ -250,15 +250,13 @@ describe("review regression: paint and font resolution", () => {
 
 describe("review regression: intent and selection honesty", () => {
   /**
-   * Owning tasks: T04 (classify honestly — done), T12 (implement boundary focus).
+   * Owning tasks: T04 (classify honestly), T12 (implement boundary focus — done).
    *
-   * The defect was not that boundary focus is unimplemented; it was that it was accepted
-   * silently, so a caller could not tell "focus applied" from "focus ignored" without
-   * diffing two drawings. The contract T04 owns is the disjunction: the intent is either
-   * executed, or reported as not executed. Asserting only the first half would demand
-   * T12's work from T04 and leave the honesty gap untested.
+   * The defect was that boundary focus was accepted silently, so a caller could not tell
+   * "applied" from "ignored" without diffing two drawings. T04 made it reportable; T12
+   * makes it *work*, so this now asserts the strongest form: the drawing changes.
    */
-  it("either applies group focus or reports it as not applied", async () => {
+  it("applies group focus to the drawing", async () => {
     const source = await fixture("group-focus");
     const compiler = new TopoIRCompiler();
     const focused = await compiler.compile(source, { source: "group-focus.topoir.yaml", format: "svg" });
@@ -270,20 +268,20 @@ describe("review regression: intent and selection honesty", () => {
     const unfocusedSvg = unfocused.artifacts[0]?.sha256;
     expect(focusedSvg).toBeDefined();
     expect(unfocusedSvg).toBeDefined();
+    // The drawing genuinely differs.
+    expect(focusedSvg).not.toBe(unfocusedSvg);
+    // And it is no longer reported as unapplied, because it was applied.
+    expect(focused.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("TOP252_INTENT_NOT_APPLIED");
 
-    if (focusedSvg !== unfocusedSvg) {
-      // Applied. Nothing to report, and T12 has landed — tighten this branch then.
-      return;
-    }
-
-    // Not applied, so it has to be reported, and the report has to be specific enough to
-    // act on: which view, which boundary, and that the drawing does not reflect it.
-    const reported = focused.diagnostics.filter((diagnostic) => diagnostic.code === "TOP252_INTENT_NOT_APPLIED");
-    expect(reported).toHaveLength(1);
-    expect(reported[0]?.message).toContain("focused");
-    expect(reported[0]?.message).toContain("platform");
-    // And the unfocused document must not carry the diagnostic, or it means nothing.
-    expect(unfocused.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("TOP252_INTENT_NOT_APPLIED");
+    // Specifically: the focused boundary is stroked at emphasis weight.
+    const view = focused.views[0];
+    if (view === undefined) throw new Error("no view");
+    const boundary = sceneElements(view).find(
+      (element) => element.type === "rect" && element.owner?.id === "platform" && element.owner.part === "boundary",
+    );
+    expect(boundary?.type).toBe("rect");
+    if (boundary?.type !== "rect") return;
+    expect(boundary.strokeWidth).toBeGreaterThan(1.5);
   });
 
   /**

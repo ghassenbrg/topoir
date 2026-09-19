@@ -53,6 +53,8 @@ Do not parse message wording. Match `code`, then use `path` and `range` to edit 
 | `TOP259_OCCURRENCE_ELEMENT_NOT_FOUND` | An occurrence references an element the model lacks, or that this view does not include |
 | `TOP261_CONNECTION_BINDING_INVALID` | A connection binds a relationship end to an occurrence this view does not contain |
 | `TOP262_CONNECTION_AMBIGUOUS` | An element appears more than once, so a relationship touching it has several candidate ends. Add a `projection.connections` binding; the compiler will not guess |
+| `TOP263_CONSTRAINT_REFERENCE_NOT_FOUND` | A layout constraint names an element the view does not contain |
+| `TOP264_CONSTRAINTS_CONTRADICT` | Two or more **required** constraints cannot all hold. The message names every constraint id involved and what they disagree about. Disagreeing *preferred* constraints are a ranking question and are not reported |
 | `TOP270_MIGRATION_DEFAULT_APPLIED` | Migration supplied something v1alpha2 requires and v1alpha1 did not, and says what |
 | `TOP271_MIGRATION_NOT_REPRESENTABLE` | A v1alpha1 field has no v1alpha2 equivalent and was not migrated. Reported rather than dropped, and never guessed at |
 | `TOP252_INTENT_NOT_APPLIED` | The view declares intent this build accepts but does not execute, so the drawing does not reflect it. The message names the view and the specific intent. Run `topoir capabilities` to see what each intent's maturity actually is |

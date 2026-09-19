@@ -81,6 +81,11 @@ export function buildScene(
           }
         : base;
       const dash = group.kind === "external-zone" || group.kind === "security-boundary" || theme.language?.boundaries === "outline" ? "7 5" : undefined;
+      // Boundary focus (T12). Until now `design.focus` on a group was accepted and did
+      // nothing, which T04 could only report. A focused boundary is drawn with the accent
+      // stroke at emphasis weight, matching how a focused component reads.
+      const focused = view.design?.focus?.includes(group.id) ?? false;
+      const boundaryStroke = focused ? (theme.edge.palette[0] ?? paint.stroke) : paint.stroke;
       return [
         {
           type: "group",
@@ -97,8 +102,8 @@ export function buildScene(
               height: groupGeometry.height,
               rx: theme.group.radius,
               fill: theme.language?.boundaries === "outline" ? "none" : paint.fill,
-              stroke: paint.stroke,
-              strokeWidth: theme.language?.boundaries === "rail" ? 0 : 1.5,
+              stroke: boundaryStroke,
+              strokeWidth: theme.language?.boundaries === "rail" ? 0 : focused ? 2.6 : 1.5,
               ...(dash === undefined ? {} : { dash }),
             },
             {
@@ -108,9 +113,9 @@ export function buildScene(
               y: groupGeometry.y + offset.y + 26,
               lines: group.labelText.lines,
               lineHeight: group.labelText.lineHeight,
-              fill: paint.text,
+              fill: focused ? boundaryStroke : paint.text,
               fontSize: theme.font.groupTitleSize,
-              fontWeight: 600,
+              fontWeight: focused ? 700 : 600,
             },
           ],
         } satisfies SceneGroup,

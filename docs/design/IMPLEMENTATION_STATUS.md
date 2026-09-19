@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-19. This file is the live execution ledger for the design program.
 
-**Program state: in progress. M0 and M1 complete. Next task: T12. Current milestone: M2 (T10–T15).**
+**Program state: in progress. M0 and M1 complete. Next task: T13. Current milestone: M2 (T10–T15).**
 
 The full review previously verified `bc64cf2`: 91 tests in 15 files passed; 240/240 synthetic cases compiled without hard geometry defects; 220/240 passed the selected defect counters; six reference candidates were deterministic with no approved parity recorded. These are historical baseline observations, not evidence that the tasks below are implemented. The design-writing task added documents/examples only.
 
@@ -22,7 +22,7 @@ Allowed task states: `not_started`, `in_progress`, `implemented_pending_gate`, `
 | T09 | M1 | complete | Scene QA on final ink: representation, attribution, clipping, real-backdrop contrast, disposition. Found 10 genuinely defective generated cases nothing had reported. See session entry. |
 | T10 | M2 | complete | v1alpha2 envelope, family registry, generated types with a drift test. Structural validation only — it does not compile yet, and discovery says so. See session entry. |
 | T11 | M2 | complete | Workspace normalization, entity identity, exact/induced selection, occurrences with required bindings, collapse coverage, v1alpha1 migration with inventory equality. v1alpha2 now compiles. See session entry. |
-| T12 | M2 | not_started | |
+| T12 | M2 | complete | Presentation plan with per-field dispositions, normalized medium and audience floors, compiled constraints with contradiction detection. Boundary focus now actually works. See session entry. |
 | T13 | M2 | not_started | |
 | T14 | M2 | not_started | |
 | T15 | M2 | not_started | |
@@ -1099,3 +1099,68 @@ operation that accepts it. Calling it implemented would overstate it.
 **Next ready task: T12** (presentation plan, medium and constraints). Its dependencies T10,
 T11 and T07 are complete, and it is what makes the `presentation` block executable rather
 than merely validated.
+
+### T12 — presentation plan, medium and constraints — 2026-09-20
+
+**Task: T12 — presentation plan, medium and constraints. State: complete.**
+
+Baseline commit `a2e2241` (T11). No unrelated worktree changes.
+
+**Boundary focus works.** This is the last of the twelve review defects to move from
+*reported* to *fixed*. T04 could only say "accepted but not applied"; the boundary is now
+drawn with the accent stroke at emphasis weight and a bold accent title. Verified by
+rendering `fixtures/review/group-focus.topoir.yaml` and inspecting it: the Platform
+boundary is visibly emphasised where before the SVG was byte-identical to the unfocused one.
+
+**Behavior implemented** (`core/src/presentation/plan.ts`).
+
+1. **Every accepted field lands in exactly one bucket** — `executable`, `advisory` or `unsupported` — and the compiled plan carries the list with a note explaining each. `intent.question` is advisory *by design* and says so; `composition.candidates` is unsupported, reports `TOP252` naming T19, and is not silently honoured as one candidate.
+
+2. **The medium is always concrete.** An undeclared medium gets an explicit default rather than being left unknown. A fixed-size medium with no dimensions gets its kind's conventional size — an author who writes "slide" has said enough, and rejecting that would be pedantry. A slide normalizes to a fixed pixel canvas for fitting purposes.
+
+3. **The effective text minimum is explicit and cannot be talked down.** It is the larger of what the caller asked for and what the audience demands, so a caller cannot make executive-deck text smaller by naming a number. Audience floors are monotonic from engineering through presentation, which a test asserts rather than trusting the literal values.
+
+4. **Constraints compile, and contradictions name their ids.** Unstated strength is `required`: an author who states a constraint and no strength has stated a requirement. Three contradiction classes are detected — opposed orderings, an ordering fighting a relative placement, and alignment fighting an ordering on the same axis — and each message names **every constraint id involved** and what they disagree about. An author told only "layout failed" has nothing to act on.
+
+5. **Disagreeing *preferred* constraints are not contradictions.** They are a ranking question, and reporting them as errors would make the softer strength useless. Asserted.
+
+**Files added:** `core/src/presentation/plan.ts`, `core/test/presentation.test.ts` (29
+assertions). **Changed:** `renderer-svg/src/build-scene.ts` (boundary focus),
+`core/src/capabilities.ts`, `core/src/index.ts`, `sdk/src/index.ts`,
+`schema/src/diagnostics.ts` (`TOP263`, `TOP264`), `docs/diagnostics.md`, plus two test files
+converted below.
+
+**Three T04 tests converted, not deleted.** They asserted boundary focus was *unapplied*;
+T12 applied it, so they began failing — which is the mechanism working. Each was rewritten
+to assert the new truth, and the replacements are **stronger**: the end-to-end test now
+checks that the two SVGs genuinely differ and that the focused boundary's stroke width
+exceeds the unfocused weight, rather than merely checking a warning was emitted. The
+registry entry for `design.focus` moved from `unsupported` to `implemented` with its
+`plannedIn` removed, and a test asserts that, so registry and behaviour cannot drift apart.
+
+**Verification:**
+
+| Command | Outcome |
+| --- | --- |
+| `pnpm exec vitest run packages/core/test/presentation.test.ts` | 29 passed |
+| `pnpm check` | build + typecheck clean; **408 tests in 31 files passed** (381 after T11) |
+| render comparison | all 20 byte-identical |
+| boundary focus render | inspected; the focused boundary is visibly emphasised |
+
+**Why no golden changed, checked rather than assumed.** Nine published examples use
+`design.focus`, and every one of them targets a **component**, never a boundary. So
+byte-identical output is the correct outcome for this change, not a coincidence — the code
+path that changed is not exercised by any golden. The behaviour is covered by the
+`group-focus` fixture instead.
+
+**Carried work.** `compilePresentation` runs and reports, but its compiled constraints are
+not yet handed to layout — nothing places components to satisfy an `order` or
+`place-relative` constraint. That is **T16** (primary path and supporting regions) and
+**T19** (candidate fitting). The plan is produced and validated; acting on it is those
+tasks. Recorded here rather than implied by the task being marked complete.
+
+**Remaining defects.** All twelve review defects are now fixed rather than merely reported.
+Reference parity remains **0/6 unreviewed**.
+
+**Next ready task: T13** (resolved style grammar and reusable rules). Its dependencies T08,
+T10 and T12 are complete, and it owns the dark-canvas cascade defect class T09 recorded.

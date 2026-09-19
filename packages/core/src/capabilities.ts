@@ -53,10 +53,8 @@ const INTENTS: readonly Capability[] = [
   {
     id: "design.focus",
     kind: "intent",
-    maturity: "unsupported",
-    summary:
-      "Focusing a component emphasises it. Focusing a group is accepted but does not yet change the drawing, and is reported as TOP252_INTENT_NOT_APPLIED.",
-    plannedIn: "T12",
+    maturity: "implemented",
+    summary: "Emphasises the named components and boundaries. A focused boundary takes the accent stroke at emphasis weight.",
   },
   {
     id: "design.audience",
@@ -167,23 +165,14 @@ export function schemaCompositions(): readonly string[] {
  * Intent a view declares that this build does not execute.
  *
  * The review found that focusing a group produced a byte-identical SVG with no diagnostic,
- * so a caller had no way to tell "focus applied" from "focus ignored". Accepted-but-inert
- * intent is now reported.
+ * so a caller had no way to tell "focus applied" from "focus ignored". T04 reported it;
+ * T12 implemented it, so focus no longer appears here. Unexecuted presentation intent is
+ * reported by `compilePresentation`, which sees the whole block.
  */
 export function intentDiagnostics(view: ViewGraph): readonly Diagnostic[] {
-  const diagnostics: Diagnostic[] = [];
-  const focus = view.design?.focus ?? [];
-  const groupIds = new Set(view.groups.map((group) => group.id));
-  const focusedGroups = focus.filter((id) => groupIds.has(id));
-  if (focusedGroups.length > 0) {
-    diagnostics.push({
-      code: "TOP252_INTENT_NOT_APPLIED",
-      severity: "warning",
-      message:
-        `View ${JSON.stringify(view.id)} focuses ${focusedGroups.map((id) => JSON.stringify(id)).join(", ")}, ` +
-        `which ${focusedGroups.length === 1 ? "is a boundary" : "are boundaries"}. Boundary focus is accepted but is not ` +
-        `applied by this build, so the drawing does not reflect it. Focus a component instead, or track T12.`,
-    });
-  }
-  return diagnostics;
+  // Boundary focus is implemented (T12), so nothing about focus is reported here any more.
+  // The function stays as the place unexecuted intent is reported, because there will be
+  // more of it as the presentation contract grows.
+  void view;
+  return [];
 }

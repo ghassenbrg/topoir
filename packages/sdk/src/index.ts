@@ -5,6 +5,7 @@ import {
   analyzeGeometry,
   analyzeScene,
   analyzeVisibility,
+  compilePresentation,
   loadWorkspace,
   projectWorkspaceView,
   bundledFontTextMeasurer,
@@ -34,7 +35,7 @@ import {
   type PngOptions,
   type Scene,
 } from "@topoir/renderer-svg";
-import type { Diagnostic } from "@topoir/schema";
+import type { Diagnostic, v1alpha2 } from "@topoir/schema";
 
 export const TOPOIR_VERSION = "0.1.0-alpha.0";
 
@@ -233,6 +234,14 @@ export class TopoIRCompiler {
       // Intent this build accepts but does not execute is reported, so a caller can tell
       // "applied" from "ignored" without diffing two drawings.
       diagnostics.push(...intentDiagnostics(view));
+      // The presentation block is compiled here even for v1alpha1 documents, because its
+      // reference checks and audience defaults apply to both languages.
+      const presentation = compilePresentation(loaded.presentationFor?.(viewId), {
+        elementIds: new Set([...view.nodes.map((node) => node.id), ...view.edges.map((edge) => edge.id)]),
+        groupIds: new Set(view.groups.map((group) => group.id)),
+        viewId,
+      });
+      diagnostics.push(...presentation.diagnostics);
 
       const measurer = options.textMeasurer ?? bundledFontTextMeasurer(fontSet);
       const measured = measureView(view, theme, measurer, (reference) => assets.resolve(reference));
@@ -303,7 +312,7 @@ export class TopoIRCompiler {
         geometry: layout.geometry,
         scene,
         plans,
-        metrics: { ...layout.metrics, ...quality.metrics, ...content.metrics, ...visibility.metrics, ...sceneQuality.metrics },
+        metrics: { ...layout.metrics, ...quality.metrics, ...content.metrics, ...visibility.metrics, ...sceneQuality.metrics, minimumTextSize: presentation.plan.minimumTextSize },
       };
       compiledViews.push(compiled);
 
@@ -438,6 +447,8 @@ interface CompilableSource {
   readonly name: string;
   readonly viewIds: readonly string[];
   readonly project: (viewId: string) => ViewGraph;
+  /** The declared presentation block, when the language has one. */
+  readonly presentationFor?: (viewId: string) => v1alpha2.Presentation | undefined;
   readonly document?: NormalizedDocument;
   readonly diagnostics: readonly Diagnostic[];
 }
@@ -466,6 +477,7 @@ function loadCompilable(sourceText: string, source: string, selection: CompileOp
       apiVersion: workspace.apiVersion,
       name: workspace.metadata.name,
       viewIds: [...projected.keys()],
+      presentationFor: (id) => workspace.views.find((view) => view.id === id)?.presentation,
       project: (id) => {
         const view = projected.get(id);
         if (view === undefined) throw new Error(`View ${JSON.stringify(id)} was not projected.`);

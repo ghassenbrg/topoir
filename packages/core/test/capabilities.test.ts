@@ -99,42 +99,28 @@ function view(overrides: Partial<ViewGraph> = {}): ViewGraph {
 }
 
 describe("unexecuted intent", () => {
-  it("reports focus on a boundary, which this build does not apply", () => {
-    const diagnostics = intentDiagnostics(view({ design: { focus: ["platform"] } } as never));
-    expect(diagnostics).toHaveLength(1);
-    expect(diagnostics[0]?.code).toBe("TOP252_INTENT_NOT_APPLIED");
-    expect(diagnostics[0]?.severity).toBe("warning");
-    expect(diagnostics[0]?.message).toContain("platform");
-  });
-
-  it("says nothing about focus on a component, which is applied", () => {
+  /**
+   * T04 added `intentDiagnostics` because boundary focus was accepted and did nothing,
+   * with no way for a caller to tell. T12 implemented it, so focus is no longer reported
+   * here — and the replacement assertions are stronger: they check the drawing changes,
+   * not merely that a warning is emitted.
+   *
+   * See `packages/sdk/test/review-regression.test.ts` for the end-to-end focus tests.
+   */
+  it("no longer reports focus, because focus is implemented", () => {
+    expect(intentDiagnostics(view({ design: { focus: ["platform"] } } as never))).toEqual([]);
     expect(intentDiagnostics(view({ design: { focus: ["api"] } } as never))).toEqual([]);
   });
 
-  it("says nothing when no focus is declared", () => {
+  it("says nothing when no intent is declared", () => {
     expect(intentDiagnostics(view())).toEqual([]);
   });
 
-  it("names every unapplied boundary, not just the first", () => {
-    const diagnostics = intentDiagnostics(
-      view({
-        groups: [
-          { id: "platform", kind: "kubernetes-cluster", label: "Platform" },
-          { id: "edge", kind: "vpc", label: "Edge" },
-        ],
-        design: { focus: ["platform", "edge", "api"] },
-      } as never),
-    );
-    expect(diagnostics).toHaveLength(1);
-    expect(diagnostics[0]?.message).toContain("platform");
-    expect(diagnostics[0]?.message).toContain("edge");
-  });
-
-  it("matches the maturity the registry advertises for focus", () => {
-    // The diagnostic and the advertised maturity have to tell the same story; if focus is
-    // ever implemented, both change together or discovery starts lying again.
+  it("advertises focus as implemented, matching what the compiler does", () => {
+    // The registry and the behaviour have to tell the same story, in both directions: if
+    // focus regressed, this and the end-to-end drawing test would both fail.
     const focus = capabilitiesOfKind("intent").find((capability) => capability.id === "design.focus");
-    expect(focus?.maturity).toBe("unsupported");
-    expect(focus?.summary).toContain("TOP252_INTENT_NOT_APPLIED");
+    expect(focus?.maturity).toBe("implemented");
+    expect(focus?.plannedIn).toBeUndefined();
   });
 });
