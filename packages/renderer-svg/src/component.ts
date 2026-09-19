@@ -9,8 +9,9 @@ export function nodeComponent(node: MeasuredNode, geometry: GeometryNode, offset
   const status = node.visual?.status;
   const accent = status === "failure" ? "#E54864" : status === "warning" ? "#D99B21" : status === "success" ? "#21A675" : focus || node.visual?.emphasis === "primary" ? theme.edge.palette[0]! : basePaint.stroke;
   const x = geometry.x + offset.x, y = geometry.y + offset.y, w = geometry.width, h = geometry.height;
-  const badge = node.visual?.badge ?? (node.visual?.replicas === undefined ? undefined : `${node.visual.replicas} replicas`);
-  const badgeHeight = badge ? 24 : 0;
+  // Drawn from the measured badge, so the strip the node was sized for is the strip drawn.
+  const badge = node.badgeText;
+  const badgeHeight = badge ? badge.height + 12 : 0;
   const showPorts = node.visual?.portLabels === "inside" && node.ports.length > 0;
   const portPanelHeight = showPorts ? 12 + node.ports.reduce((sum, port) => sum + Math.max(28, (port.labelText?.height ?? 0) + 12), 0) : 0;
   const vertical = shape === "icon" || shape === "image";
@@ -32,7 +33,14 @@ export function nodeComponent(node: MeasuredNode, geometry: GeometryNode, offset
     children.push({ ...base, fill: "none", strokeWidth: 2, rx: 12 });
   }
   const size = theme.node.iconSize;
-  const resolvedAssets = [...new Map(assetReferences(node).map((reference) => assets.resolve(reference, accent)).filter((value) => value !== undefined).map((value) => [value.id, value])).values()].slice(0, 5);
+  // One drawn block per authored role. This used to key a Map on the *resolved* asset id
+  // and then `.slice(0, 5)`, so a sixth schema-permitted role was dropped outright and two
+  // roles sharing image bytes collapsed into one. Deduplicating image bytes must not
+  // deduplicate authored roles, so the requested reference is the identity here.
+  const roles = node.assetRoles?.map((role) => role.reference) ?? assetReferences(node);
+  const resolvedAssets = roles
+    .map((reference) => assets.resolve(reference, accent))
+    .filter((value): value is NonNullable<typeof value> => value !== undefined);
   const asset = resolvedAssets[0] ?? assets.resolve(node.kind, accent);
   const iconBoxWidth = node.imageSize?.width ?? (shape === "image" ? w - 32 : size);
   const iconBoxHeight = node.imageSize?.height ?? (shape === "image" ? Math.max(size, h - node.labelText.height - (node.descriptionText?.height ?? 0) - 48 - badgeHeight) : size);
@@ -64,8 +72,12 @@ export function nodeComponent(node: MeasuredNode, geometry: GeometryNode, offset
     }
   }
   if (badge) {
-    children.push({ type: "rect", x: x + 12, y: y + h - 26, width: w - 24, height: 19, rx: 4, fill: theme.canvas.background });
-    children.push({ type: "text", x: x + w / 2, y: y + h - 12, lines: [badge], lineHeight: 12, fontSize: 10, fontWeight: 600, fill: accent, anchor: "middle" });
+    // A one-line badge keeps exactly the strip and baseline it has always had; only a
+    // wrapped badge grows the strip, so existing output is unchanged.
+    const stripHeight = badge.height + 7;
+    const stripY = y + h - stripHeight - 7;
+    children.push({ type: "rect", x: x + 12, y: stripY, width: w - 24, height: stripHeight, rx: 4, fill: theme.canvas.background });
+    children.push({ type: "text", x: x + w / 2, y: stripY + badge.lineHeight + 2, lines: badge.lines, lineHeight: badge.lineHeight, fontSize: 10, fontWeight: 600, fill: accent, anchor: "middle" });
   }
   if (step !== undefined) {
     children.push({ type: "circle", cx: x + 12, cy: y + 12, radius: 12, fill: accent });

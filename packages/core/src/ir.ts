@@ -116,9 +116,27 @@ export interface MeasuredPort extends NormalizedPort {
   readonly slot?: Rect;
 }
 
+/**
+ * How much of a piece of authored content actually reached the drawing.
+ *
+ * `abbreviated` is a legal outcome, but the contract requires it to be *declared by
+ * measurement* rather than inferred later from a missing primitive. A caller that sees
+ * `rendered` can rely on every grapheme of `source` being present in `lines`.
+ *
+ * This is the narrow T01 form of the `ContentDisposition` table in
+ * `docs/design/04-components-and-styles.md`; T07 replaces it with the full per-content
+ * mapping that also carries owning scene IDs.
+ */
+export type TextDisposition = "rendered" | "abbreviated";
+
 export interface MeasuredText extends Size {
   readonly lines: readonly string[];
   readonly lineHeight: number;
+  /** The complete authored text this layout was derived from. */
+  readonly source: string;
+  readonly disposition: TextDisposition;
+  /** Graphemes of `source` that no line carries. Present only when abbreviated. */
+  readonly omittedGraphemes?: number;
 }
 
 export interface MeasuredNode extends NormalizedNode, Size {
@@ -127,6 +145,23 @@ export interface MeasuredNode extends NormalizedNode, Size {
   readonly descriptionText?: MeasuredText;
   readonly imageSize?: Size;
   readonly assetSizes?: readonly Size[];
+  /**
+   * The badge strip, measured before layout so the node is sized to hold it. Without
+   * this the badge was drawn at whatever width its text happened to need and ran off
+   * the component — and off the canvas — with no diagnostic.
+   */
+  readonly badgeText?: MeasuredText;
+  /**
+   * One entry per authored asset role, in authored order. Roles are distinct even when
+   * two of them resolve to the same image bytes, so this array is never deduplicated by
+   * resolved asset identity. `size` is absent when the role did not resolve.
+   */
+  readonly assetRoles?: readonly MeasuredAssetRole[];
+}
+
+export interface MeasuredAssetRole {
+  readonly reference: string;
+  readonly size?: Size;
 }
 
 export interface MeasuredGroup extends NormalizedGroup {

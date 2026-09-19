@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { AssetRegistry, discoverAssets } from "@topoir/assets";
 import {
+  analyzeContent,
   analyzeGeometry,
   loadDocument,
   measureView,
@@ -171,13 +172,18 @@ export class TopoIRCompiler {
 
       const quality = analyzeGeometry(measured, layout.geometry);
       diagnostics.push(...quality.diagnostics);
+      // Content accounting is independent of geometry: text can be abbreviated by
+      // measurement long before layout runs, and that loss has to be reported rather than
+      // left for an author to notice in the picture.
+      const content = analyzeContent(measured);
+      diagnostics.push(...content.diagnostics);
       const scene = buildScene(measured, layout.geometry, theme, assets);
       const compiled: CompiledView = {
         view,
         measured,
         geometry: layout.geometry,
         scene,
-        metrics: { ...layout.metrics, ...quality.metrics },
+        metrics: { ...layout.metrics, ...quality.metrics, ...content.metrics },
       };
       compiledViews.push(compiled);
 

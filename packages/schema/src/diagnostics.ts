@@ -11,7 +11,7 @@
  * - `TOP1xx` parse, structural schema and command-line usage
  * - `TOP2xx` semantic model references
  * - `TOP3xx` themes and visual assets
- * - `TOP4xx` layout and geometry quality
+ * - `TOP4xx` layout, geometry and content quality
  * - `TOP9xx` unexpected failure
  */
 export const TOPOIR_DIAGNOSTIC_CODES = [
@@ -61,6 +61,7 @@ export const TOPOIR_DIAGNOSTIC_CODES = [
   "TOP432_ANNOTATION_OVERLAP",
   "TOP433_ASPECT_OFF_TARGET",
   "TOP434_CANVAS_SPARSE",
+  "TOP440_TEXT_ABBREVIATED",
   "TOP900_INTERNAL_ERROR",
 ] as const;
 

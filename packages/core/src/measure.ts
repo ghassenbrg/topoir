@@ -1,5 +1,6 @@
 import type {
   MeasuredAnnotation,
+  MeasuredAssetRole,
   MeasuredEdge,
   MeasuredGroup,
   MeasuredNode,
@@ -16,6 +17,23 @@ export interface TextStyle {
   readonly fontWeight?: 400 | 500 | 600 | 700;
   readonly lineHeight: number;
 }
+
+/**
+ * The badge strip's text style. The renderer draws badges at exactly these values, so
+ * measurement and drawing cannot disagree about how wide a badge is.
+ */
+export const BADGE_STYLE: TextStyle = { fontSize: 10, fontWeight: 600, lineHeight: 1.2 };
+
+/**
+ * How wide a badge may grow before it wraps. The schema caps a badge at 48 characters,
+ * which measures about 530px in the worst case; letting the node grow that wide to hold
+ * one strip distorts every layout around it. Wrapping past this width keeps the whole
+ * badge visible while bounding the component.
+ */
+export const BADGE_MAX_WIDTH = 260;
+
+/** Lines a badge may wrap to before `layoutText` declares it abbreviated. */
+export const BADGE_MAX_LINES = 3;
 
 export interface TextMeasurer {
   readonly id: string;
@@ -78,19 +96,38 @@ export function measureView(
     const iconSpace = theme.node.iconSize + 12;
     const shape = nodeShape(node, theme);
     const references = assetReferences(node);
-    const assetSizes = references.map((reference) => assetSize?.(reference)).filter((value): value is Size => value !== undefined);
+    // One role per authored reference, kept in authored order. A role that did not resolve
+    // keeps its slot so the count of requested roles stays visible to everything downstream;
+    // the SDK reports it as TOP322_ASSET_NOT_FOUND.
+    const assetRoles: MeasuredAssetRole[] = references.map((reference) => {
+      const size = assetSize?.(reference);
+      return size === undefined ? { reference } : { reference, size };
+    });
+    const assetSizes = assetRoles.map((role) => role.size).filter((value): value is Size => value !== undefined);
     const intrinsic = shape === "image" ? assetSizes[0] : undefined;
     const imageScale = intrinsic ? Math.min(240 / intrinsic.width, 140 / intrinsic.height) : 1;
     const imageSize = intrinsic ? { width: round(intrinsic.width * imageScale), height: round(intrinsic.height * imageScale) } : undefined;
     const vertical = shape === "icon" || shape === "image";
-    const badgeHeight = node.visual?.badge !== undefined || node.visual?.replicas !== undefined ? 24 : 0;
+    // The badge is measured like any other content. Previously only its 24px strip height
+    // was reserved and its width was ignored, so a schema-valid 48-character badge was
+    // drawn 3.5x wider than the node and ran off the canvas without a diagnostic.
+    const badgeSource = node.visual?.badge ?? (node.visual?.replicas === undefined ? undefined : `${node.visual.replicas} replicas`);
+    const badgeText =
+      badgeSource === undefined
+        ? undefined
+        : layoutText(badgeSource, BADGE_MAX_WIDTH, BADGE_STYLE, textMeasurer, BADGE_MAX_LINES);
+    const badgeHeight = badgeText === undefined ? 0 : round(badgeText.height + 12);
     const showPorts = node.visual?.portLabels === "inside" && node.ports.length > 0;
     const portRows = showPorts ? node.ports.map((port) => layoutText(port.label, 210, { fontSize: theme.font.descriptionSize, fontWeight: 600, lineHeight: 1.2 }, textMeasurer, 1)) : [];
     const portPanelHeight = portRows.length ? 12 + portRows.reduce((sum, row) => sum + Math.max(28, row.height + 12), 0) : 0;
     const portPanelWidth = Math.max(0, ...portRows.map((row) => row.width + 36));
-    const assetStripWidth = assetSizes.length > 1 ? Math.min(5, assetSizes.length) * (theme.node.iconSize + 8) : 0;
+    // Every requested role occupies a slot, including ones that share image bytes with
+    // another role. The previous `Math.min(5, ...)` cap silently disagreed with the
+    // schema's maximum of six.
+    const assetStripWidth = assetRoles.length > 1 ? assetRoles.length * (theme.node.iconSize + 8) : 0;
     const shapePadding = shape === "cylinder" || shape === "diamond" ? 28 : shape === "stack" ? 8 : 0;
-    const width = round(Math.max(theme.node.minWidth, (imageSize?.width ?? 0) + 32, portPanelWidth + theme.spacing.nodePaddingX * 2, assetStripWidth + theme.spacing.nodePaddingX * 2, textWidth + (vertical ? 0 : Math.max(iconSpace, assetStripWidth)) + theme.spacing.nodePaddingX * 2 + shapePadding));
+    const badgeWidth = badgeText === undefined ? 0 : round(badgeText.width + 24);
+    const width = round(Math.max(theme.node.minWidth, badgeWidth, (imageSize?.width ?? 0) + 32, portPanelWidth + theme.spacing.nodePaddingX * 2, assetStripWidth + theme.spacing.nodePaddingX * 2, textWidth + (vertical ? 0 : Math.max(iconSpace, assetStripWidth)) + theme.spacing.nodePaddingX * 2 + shapePadding));
     // Half the relationships can be expected on each of the two facing sides.
     const connectorHeight = Math.min(360, Math.ceil((incident.get(node.id) ?? 0) / 2) * connectorSpacing);
     const height = round(Math.max(theme.node.minHeight, connectorHeight, textHeight + theme.spacing.nodePaddingY * 2 + (vertical ? (imageSize?.height ?? theme.node.iconSize) + 12 : 0) + shapePadding + badgeHeight + portPanelHeight));
@@ -110,6 +147,8 @@ export function measureView(
       labelText,
       ...(imageSize ? { imageSize } : {}),
       ...(assetSizes.length ? { assetSizes } : {}),
+      ...(assetRoles.length ? { assetRoles } : {}),
+      ...(badgeText === undefined ? {} : { badgeText }),
       ...(descriptionText === undefined ? {} : { descriptionText }),
       ports: node.ports.map((port, index) => ({
         ...port,
@@ -168,6 +207,18 @@ export function measureView(
   return { ...view, groups, nodes, edges, annotations };
 }
 
+/**
+ * A piece of a source line to place. `continues` marks a fragment that was split out of
+ * the middle of a single word: it must never be rejoined to its predecessor with a space,
+ * because that would silently rewrite an identifier, a URL or an ARN into something the
+ * author never wrote. Tracking it here keeps that guarantee structural instead of relying
+ * on a chunk happening to be too wide to share a line.
+ */
+interface Piece {
+  readonly text: string;
+  readonly continues: boolean;
+}
+
 export function layoutText(
   text: string,
   maxWidth: number,
@@ -184,22 +235,26 @@ export function layoutText(
       continue;
     }
     let current = "";
-    const pieces = words.flatMap((word) => {
-      if (measurer.measure(word, style).width <= maxWidth) return [word];
-      const chunks: string[] = [];
+    const pieces = words.flatMap((word): Piece[] => {
+      if (measurer.measure(word, style).width <= maxWidth) return [{ text: word, continues: false }];
+      const chunks: Piece[] = [];
       let chunk = "";
       for (const { segment } of new Intl.Segmenter("en", { granularity: "grapheme" }).segment(word)) {
-        if (chunk && measurer.measure(chunk + segment, style).width > maxWidth) { chunks.push(chunk); chunk = ""; }
+        if (chunk && measurer.measure(chunk + segment, style).width > maxWidth) {
+          chunks.push({ text: chunk, continues: chunks.length > 0 });
+          chunk = "";
+        }
         chunk += segment;
       }
-      if (chunk) chunks.push(chunk);
+      if (chunk) chunks.push({ text: chunk, continues: chunks.length > 0 });
       return chunks;
     });
-    for (const word of pieces) {
-      const candidate = current === "" ? word : `${current} ${word}`;
+    for (const piece of pieces) {
+      const separator = piece.continues ? "" : " ";
+      const candidate = current === "" ? piece.text : `${current}${separator}${piece.text}`;
       if (current !== "" && measurer.measure(candidate, style).width > maxWidth) {
         lines.push(current);
-        current = word;
+        current = piece.text;
       } else {
         current = candidate;
       }
@@ -208,18 +263,36 @@ export function layoutText(
   }
 
   let visible = lines.slice(0, maxLines);
+  let abbreviated = false;
   if (lines.length > maxLines && visible.length > 0) {
     const last = visible[visible.length - 1] ?? "";
     visible = [...visible.slice(0, -1), ellipsize(last, maxWidth, style, measurer)];
+    abbreviated = true;
   }
   const sizes = visible.map((line) => measurer.measure(line, style));
   const lineHeight = round(style.fontSize * style.lineHeight);
+  const omitted = abbreviated ? omittedGraphemeCount(text, visible) : 0;
   return {
     lines: visible,
     width: round(Math.min(maxWidth, Math.max(0, ...sizes.map((size) => size.width)))),
     height: round(visible.length * lineHeight),
     lineHeight,
+    source: text,
+    disposition: abbreviated ? "abbreviated" : "rendered",
+    ...(abbreviated ? { omittedGraphemes: omitted } : {}),
   };
+}
+
+/**
+ * Graphemes of the authored text that no visible line carries. Counting graphemes rather
+ * than UTF-16 units keeps the number meaningful for scripts where one visible character
+ * is several code units.
+ */
+function omittedGraphemeCount(source: string, visible: readonly string[]): number {
+  const segmenter = new Intl.Segmenter("en", { granularity: "grapheme" });
+  const count = (value: string): number => [...segmenter.segment(value.replace(/\s+/gu, ""))].length;
+  const drawn = visible.map((line) => line.replace(/…$/u, "")).join("");
+  return Math.max(0, count(source) - count(drawn));
 }
 
 function ellipsize(text: string, maxWidth: number, style: TextStyle, measurer: TextMeasurer): string {

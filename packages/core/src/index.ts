@@ -1,4 +1,5 @@
 export * from "./ir.js";
+export * from "./content.js";
 export * from "./font-measurer.js";
 export * from "./measure.js";
 export * from "./pipeline.js";

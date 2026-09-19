@@ -7,7 +7,7 @@ Every diagnostic has a stable `code`, severity, message, JSON-pointer `path` whe
 | TOP1xx | Parse and structural schema | syntax, required/unknown property, type mismatch |
 | TOP2xx | Semantic model | duplicate ID, group cycle, unknown endpoint/port/flow/view reference |
 | TOP3xx | Visual assets | unknown theme, template, font, or icon |
-| TOP4xx | Geometry quality | layout failure, overlap, empty/diagonal route, node intersection, boundary/label warning |
+| TOP4xx | Geometry and content quality | layout failure, overlap, empty/diagonal route, node intersection, boundary/label warning, abbreviated content |
 | TOP5xx | Artifact output | scene/SVG/PNG/export failure |
 | TOP9xx | Unexpected failure | uncaught CLI/runtime error |
 
@@ -53,5 +53,20 @@ Do not parse message wording. Match `code`, then use `path` and `range` to edit 
 | `TOP432_ANNOTATION_OVERLAP` | A note overlaps a node, heading or another annotation |
 | `TOP433_ASPECT_OFF_TARGET` | The diagram is more than 3x away from the view's `layout.aspectRatio`, so it is not the shape it was asked for; raise the component count it has room for, or set a target that suits the model |
 | `TOP434_CANVAS_SPARSE` | Components cover under 6% of the canvas, so the diagram reads as mostly empty space |
+
+## Content diagnostics
+
+Content accounting runs on the measured view, before layout. It reports authored text that
+did not fit the component that owns it.
+
+| Code | Repair |
+| --- | --- |
+| `TOP440_TEXT_ABBREVIATED` | Authored text did not fit and was shortened with an ellipsis. The message names the owner, the content role, the drawn text and how many characters are not drawn. Shorten the text, give the component more text width, or accept the abbreviation deliberately |
+
+Abbreviation is a legal outcome, but never a silent one: measurement declares it, so a
+caller can tell full content from shortened content without comparing pictures. Every
+measured text run carries `source`, a `disposition` of `rendered` or `abbreviated`, and
+`omittedGraphemes` when abbreviated. The view metrics `abbreviatedTextRuns` and
+`omittedGraphemes` total it for the view.
 
 An absence of these diagnostics is necessary but not sufficient for the [visual acceptance benchmark](visual-benchmark.md).

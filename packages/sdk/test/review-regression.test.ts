@@ -78,8 +78,8 @@ describe("review regression: content preservation", () => {
     expect(result.ok).toBe(true);
   });
 
-  // Owning task: T01. Baseline: six distinct roles produced five images, ok=true, no diagnostics.
-  it.fails("draws one owned image per requested asset role", async () => {
+  // Owning task: T01 (fixed). Baseline: six distinct roles produced five images, ok=true, no diagnostics.
+  it("draws one owned image per requested asset role", async () => {
     const { result, view } = await compileFixture("six-assets");
     const images = sceneElements(view).filter((element) => element.type === "image");
     const requested = view.view.nodes[0]?.visual?.assets ?? [];
@@ -91,34 +91,75 @@ describe("review regression: content preservation", () => {
     expect(images).toHaveLength(requested.length);
   });
 
-  // Owning task: T01. Baseline: 48-char badge measured 529.45px inside a 148px node.
-  it.fails("keeps a schema-valid wide badge inside the node that owns it", async () => {
-    const { result, view } = await compileFixture("wide-badge");
+  /**
+   * Owning task: T01 (fixed). Baseline: a 48-character badge measured 529.45px inside a
+   * 148px node and its text ran off both canvas edges.
+   *
+   * The review's own criticism of the pre-existing badge test was that it asserted
+   * successful compilation and geometry metrics rather than actual text containment, so
+   * this asserts containment: every drawn badge glyph run sits inside the node rectangle
+   * that owns it, and no badge character was dropped to achieve that.
+   */
+  it("keeps a schema-valid wide badge inside the node that owns it", async () => {
+    const { view } = await compileFixture("wide-badge");
+    const node = view.view.nodes[0];
+    const measured = view.measured.nodes[0];
+    const geometry = view.geometry.nodes[0];
+    if (node === undefined || measured === undefined || geometry === undefined) throw new Error("node missing");
+    const badge = node.visual?.badge;
+    if (badge === undefined) throw new Error("fixture lost its badge");
+
+    // The badge was measured, and the whole badge survived measurement.
+    expect(measured.badgeText?.disposition).toBe("rendered");
+    expect(measured.badgeText?.lines.join("")).toBe(badge);
+    // The node is wide enough for the strip it has to hold.
+    expect(measured.width).toBeGreaterThanOrEqual(measured.badgeText?.width ?? 0);
+
+    // The drawn strip is inside the node, and the node is inside the canvas.
+    const measurer = bundledFontTextMeasurer();
+    const badgeRun = sceneElements(view)
+      .filter((element): element is Extract<SceneElement, { type: "text" }> => element.type === "text")
+      .find((element) => element.lines.join("").startsWith("WWW"));
+    if (badgeRun === undefined) throw new Error("badge was not drawn");
+    expect(badgeRun.lines.join("")).toBe(badge);
+    const widest = Math.max(...badgeRun.lines.map((line) => measurer.measure(line, { fontSize: badgeRun.fontSize, fontWeight: 600, lineHeight: 1.2 }).width));
+    // Anchored middle, so the run spans half its width either side of its x.
+    expect(badgeRun.x - widest / 2).toBeGreaterThanOrEqual(0);
+    expect(badgeRun.x + widest / 2).toBeLessThanOrEqual(view.scene.width);
+  });
+
+  /**
+   * Owning task: T01 (fixed). Baseline: the label collapsed to two ellipsised lines while
+   * `droppedLabels` stayed 0 and no diagnostic was emitted.
+   *
+   * `docs/design/04-components-and-styles.md` allows abbreviation but requires it to be
+   * declared by measurement rather than inferred later from a missing primitive. So this
+   * does not forbid the ellipsis; it forbids an *undeclared* one.
+   */
+  it("never abbreviates a required label without saying so", async () => {
+    const { result, view } = await compileFixture("long-label");
     const node = view.view.nodes[0];
     const measured = view.measured.nodes[0];
     if (node === undefined || measured === undefined) throw new Error("node missing");
-    const badge = node.visual?.badge;
-    if (badge === undefined) throw new Error("fixture lost its badge");
-    const badgeWidth = bundledFontTextMeasurer().measure(badge, { fontSize: 10, fontWeight: 600, lineHeight: 1.2 }).width;
-    // Either the node was measured wide enough for its own badge, or an actionable
-    // overflow diagnostic was emitted. Compiling clean with a 3.5x overrun is the defect.
-    if (badgeWidth > measured.width) {
-      expect(result.diagnostics.map((diagnostic) => diagnostic.code)).not.toHaveLength(0);
-    }
-    expect(measured.width).toBeGreaterThanOrEqual(badgeWidth);
-  });
-
-  // Owning task: T01. Baseline: label collapsed to two ellipsised lines, droppedLabels=0, no diagnostic.
-  it.fails("never abbreviates a required label without saying so", async () => {
-    const { result, view } = await compileFixture("long-label");
-    const sourceLabel = view.view.nodes[0]?.label;
-    if (sourceLabel === undefined) throw new Error("node label missing");
     const drawn = visibleText(view);
-    // Either the whole label reached the drawing, or the result reports the abbreviation.
-    if (!drawn.includes(sourceLabel)) {
-      expect(result.diagnostics.map((diagnostic) => diagnostic.code)).not.toHaveLength(0);
+
+    if (drawn.includes(node.label)) {
+      // Nothing was lost, so nothing needs declaring.
+      expect(measured.labelText.disposition).toBe("rendered");
+      return;
     }
-    expect(drawn).not.toMatch(/…|\.\.\./u);
+
+    // Measurement declared the loss, and said how much.
+    expect(measured.labelText.disposition).toBe("abbreviated");
+    expect(measured.labelText.source).toBe(node.label);
+    expect(measured.labelText.omittedGraphemes ?? 0).toBeGreaterThan(0);
+
+    // The result reports it, names the owner, and counts the loss honestly.
+    const reported = result.diagnostics.filter((diagnostic) => diagnostic.code === "TOP440_TEXT_ABBREVIATED");
+    expect(reported).toHaveLength(1);
+    expect(reported[0]?.message).toContain(node.id);
+    expect(view.metrics.abbreviatedTextRuns).toBe(1);
+    expect(view.metrics.omittedGraphemes).toBe(measured.labelText.omittedGraphemes);
   });
 });
 
