@@ -1,0 +1,99 @@
+# Target v1alpha2 design example; not accepted by the current compiler.
+apiVersion: topoir.dev/v1alpha2
+kind: DiagramWorkspace
+metadata:
+  name: checkout-system
+  title: Checkout responsibilities
+entities:
+  - id: checkout
+    kind: software.service
+    label: Checkout API
+models:
+  - id: deployment
+    family: architecture
+    body:
+      groups:
+        - id: production
+          kind: environment
+          label: Production
+      nodes:
+        - id: customer
+          kind: client
+          label: Customer
+        - id: api
+          kind: api
+          entity: checkout
+          group: production
+        - id: orders
+          kind: database
+          label: Orders
+          technology: postgresql
+          group: production
+        - id: queue
+          kind: queue
+          label: Fulfillment queue
+          group: production
+      edges:
+        - id: submit
+          from: customer
+          to: api
+          label: Submit order
+          kind: request
+        - id: persist
+          from: api
+          to: orders
+          label: Store order
+          kind: write
+        - id: publish
+          from: api
+          to: queue
+          label: Request fulfillment
+          kind: publish
+views:
+  - id: overview
+    model: deployment
+    title: Checkout stores orders and delegates fulfillment
+    projection:
+      edgePolicy: induced
+    presentation:
+      intent:
+        question: What is checkout responsible for?
+        audience: engineering
+        takeaway: Persistence and asynchronous fulfillment are separate responsibilities.
+        focus: [api]
+        story: [submit, publish]
+      medium:
+        kind: slide
+        width: 1600
+        height: 900
+        padding: 48
+        minTextSize: 16
+        fit: contain
+      style:
+        pack: technical-clean
+        variant: light
+      composition:
+        strategy: request-spine
+        candidates: 3
+      constraints:
+        - id: request-order
+          type: order
+          items: [customer, api, queue]
+          axis: x
+          strength: required
+        - id: state-below-compute
+          type: place-relative
+          subject: orders
+          reference: api
+          side: below
+          gap: 48
+          strength: preferred
+          priority: 4
+      contentPolicy:
+        detail: standard
+        required:
+          - element: api
+            field: label
+          - element: submit
+          - element: persist
+          - element: publish

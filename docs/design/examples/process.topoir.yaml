@@ -1,0 +1,82 @@
+# Target v1alpha2 design example; not accepted by the current compiler.
+apiVersion: topoir.dev/v1alpha2
+kind: DiagramWorkspace
+metadata:
+  name: purchase-approval
+models:
+  - id: approval
+    family: process
+    body:
+      lanes:
+        - id: requester
+          label: Requester
+        - id: reviewer
+          label: Reviewer
+      steps:
+        - id: start
+          kind: start
+          label: Purchase needed
+          lane: requester
+        - id: submit
+          kind: task
+          label: Submit purchase request
+          lane: requester
+        - id: decide
+          kind: decision
+          label: Request approved?
+          lane: reviewer
+        - id: purchase
+          kind: task
+          label: Place purchase
+          lane: requester
+        - id: revise
+          kind: task
+          label: Revise request
+          lane: requester
+        - id: end
+          kind: end
+          label: Purchase placed
+          lane: requester
+      transitions:
+        - id: begin
+          from: start
+          to: submit
+        - id: review
+          from: submit
+          to: decide
+        - id: approved
+          from: decide
+          to: purchase
+          outcome: Approved
+        - id: rejected
+          from: decide
+          to: revise
+          outcome: Changes required
+        - id: resubmit
+          from: revise
+          to: submit
+          label: Resubmit
+        - id: finish
+          from: purchase
+          to: end
+views:
+  - id: workflow
+    model: approval
+    title: Purchase approval and revision
+    presentation:
+      intent:
+        question: Who acts next when a request needs changes?
+        audience: learning
+        story: [begin, review, rejected, resubmit]
+      medium:
+        kind: slide
+        width: 1600
+        height: 900
+        padding: 48
+        minTextSize: 16
+        fit: contain
+      composition:
+        strategy: swimlane-process
+      style:
+        pack: technical-clean
+        variant: light
