@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-19. This file is the live execution ledger for the design program.
 
-**Program state: in progress. M0 complete. Next task: T05. Current milestone: M1 (T05–T09).**
+**Program state: in progress. M0 complete. Next task: T06. Current milestone: M1 (T05–T09).**
 
 The full review previously verified `bc64cf2`: 91 tests in 15 files passed; 240/240 synthetic cases compiled without hard geometry defects; 220/240 passed the selected defect counters; six reference candidates were deterministic with no approved parity recorded. These are historical baseline observations, not evidence that the tasks below are implemented. The design-writing task added documents/examples only.
 
@@ -15,7 +15,7 @@ Allowed task states: `not_started`, `in_progress`, `implemented_pending_gate`, `
 | T02 | M0 | complete | Resolved font contract, token-based theme inheritance, contrast and colour diagnostics. `TOP330`/`TOP331`/`TOP442` added. See session entry. |
 | T03 | M0 | complete | Attachment/bounds/coverage/nesting checks, explicit raster dimensions, output-name preflight. Found and fixed a real endpoint-detaching routing bug. See session entry. |
 | T04 | M0 | complete | Capability registry behind CLI+MCP, `TOP252_INTENT_NOT_APPLIED`, hash-bound review records, benchmark counter/shape/acceptance separation, generator consolidation. See session entry. |
-| T05 | M1 | not_started | |
+| T05 | M1 | complete | ComponentPlan/blocks/attachments/disposition, SceneDocument and Medium in core; renderer re-exports; three-family fixtures and dependency-direction test. Interfaces only. See session entry. |
 | T06 | M1 | not_started | |
 | T07 | M1 | not_started | |
 | T08 | M1 | not_started | |
@@ -456,3 +456,68 @@ Exit criterion: "T00–T04 complete, all reproduced failures fixed or explicitly
 **Outstanding gate, not satisfied and not claimed:** no human visual review of the six reference cases has been obtained. All six are `unreviewed`. `--require-parity` fails, correctly. Granting parity requires a person to compare the artifacts and add a record; an agent must not add one on their behalf.
 
 **Next ready task: T05** (define internal V2 component/scene interfaces), which opens M1. Its dependencies T01, T02 and T03 are complete.
+
+### T05 — internal V2 component/scene interfaces — 2026-09-20
+
+**Task: T05 — define internal V2 component/scene interfaces. State: complete.**
+
+Baseline commit `9abaf2e` (T04). No unrelated worktree changes.
+
+**Scope note.** T05 is a contract task. It adds interfaces and the tests that prove they are
+adequate; it wires nothing into the compiler. `measureView`, `buildScene` and the legacy
+`Scene` are untouched and remain what the pipeline uses. T07 implements the measurement
+engine behind `ComponentPlan` and T08 migrates the renderer onto it. The capability
+registry does not advertise any of this, and no rendered output changes.
+
+**Behavior implemented.**
+
+1. **`ComponentPlan` and the block grammar** (`core/src/components/`). Blocks are `text`, `asset`, `badge`, `rule`, `spacer`, `row`, `column`, `grid`, `table`, `stack` and a restricted `vector`. Every block carries both `bounds` (collision space) and `inkBounds` (actual painted extent), which is the distinction the review found missing — `analyzeGeometry` reasons about layout rectangles while the defects live in the paint. `vector` refers to a registered shape id, never a raw path from a document, so a source cannot make the compiler draw arbitrary geometry.
+
+2. **`ShapedText` carries its own source and its own continuation flags.** `source` is the authored string, kept whatever happens to the visible lines, so content accounting never reconstructs it. Each line has `continuesPrevious`, marking a mid-word split; a consumer rejoining lines must not insert a space there. The T01 fix made that guarantee structural inside `layoutText`; this makes it part of the contract so it survives the T07 rewrite.
+
+3. **`AttachmentSite` replaces "node id plus a coordinate".** A site has a role — `side`, `port`, `row`, `perimeter` or `event` — a point, an outward normal, an owning region, allowed directions and a capacity. Routes reference an attachment id, so "which part of this component does this connector belong to" is answerable after layout instead of inferred from proximity. `Silhouette` is a union covering rect, ellipse, diamond, cylinder, stack, polygon and lifeline, because a stacked sheet's and a cylinder cap's visible outlines differ from their layout rectangle and attaching to the rectangle leaves connectors visibly detached — the class of defect T03 now catches.
+
+4. **`ContentDisposition` is the full four-state form** (`rendered`, `abbreviated`, `representedBy`, `omitted`) with owning scene ids, a required reason for anything not `rendered`, and a representative for `representedBy`. T01 shipped the narrow two-state version inside `MeasuredText`; this is the contract it migrates to.
+
+5. **`SceneDocument` lives in core** (`core/src/scene/`). Every primitive has a stable scene id and an `owner` naming the occurrence, relationship, region, annotation or chrome it exists for, plus a `semanticIndex` giving the inverse. That pair is what makes coverage checkable **in both directions**: nothing required is unrepresented, and nothing drawn is unexplained. `LAYER_ORDER` is fixed rather than per-diagram, because a label that falls behind a component in some documents and in front in others is a bug that only appears sometimes. `SceneTextPrimitive` carries a `backdrop`, so contrast is measured against what is actually painted behind a run rather than against the canvas default — the T02 check currently works from theme tokens and will move onto this at T09.
+
+6. **`Medium`** (`core/src/scene/medium.ts`). Legibility is a property of a drawing *at a size*, and without a declared medium the compiler cannot say a result is unreadable. `fitToMedium` reports the scale, the resulting text size and whether that clears the medium's floor — reported, not applied, because a fit that pushes text under the minimum is not a fit. A test reproduces the review's 37,491x370 ribbon as an illegible fit.
+
+**Files added:**
+
+- `packages/core/src/components/blocks.ts`, `plan.ts`, `index.ts`
+- `packages/core/src/scene/document.ts`, `medium.ts`, `refs.ts`, `index.ts`
+- `packages/core/test/component-contract.test.ts` — 21 assertions
+- `packages/core/test/dependencies.test.ts` — 4 assertions
+
+**Files changed:** `packages/core/src/index.ts` (exports), `packages/renderer-svg/src/index.ts` (compatibility re-exports).
+
+**Acceptance: one plan structure covers three families.** The fixtures construct real values, not mocks:
+
+- **Gateway route table** — a `table` block whose rows are separately attachable via `role: "row"` sites carrying `region`, so a connector meets the row it is drawn against.
+- **Process decision** — a `diamond` silhouette whose outgoing sites carry `labelBounds`, so an outcome label belongs to the attachment rather than floating near the component.
+- **Interaction participant** — a `lifeline` silhouette with `role: "event"` sites ordered in time, where `inkBounds.height` is more than ten times `layoutBounds.height`. That ratio is precisely the case a single layout rectangle cannot describe, and it is asserted.
+
+A further test asserts all three have identical key sets: no family needs a field the others lack, and three distinct silhouette kinds are in use. That is the criterion "one component plan can represent a gateway table, a process decision and an interaction participant", tested rather than asserted in prose.
+
+**Verification:**
+
+| Command | Outcome |
+| --- | --- |
+| `pnpm exec vitest run packages/core/test/component-contract.test.ts` | 21 passed |
+| `pnpm exec vitest run packages/core/test/dependencies.test.ts` | 4 passed |
+| `pnpm check` | build + typecheck clean; **214 tests in 23 files passed** (189 after T04) |
+| render comparison | unchanged, as expected for a contract-only task |
+| export surface probe | all 10 V2 helpers reachable from the SDK; renderer re-exports present; legacy renderer exports intact |
+
+**No dependency cycle.** The new test checks four properties: the workspace graph is acyclic; no package depends upward through the declared layer table; `@topoir/core` depends on `@topoir/schema` and nothing else; and no file under `core/src` imports from a higher package, which catches an import that bypasses the manifest. The third is the property that makes it correct for `SceneDocument` to live in core — quality analysis and export both need scene types, and neither should have to pull in an SVG package to get them.
+
+**Legacy API remains buildable.** Full build and typecheck pass, the quickstart render is byte-identical, and the renderer still exports `buildScene`, `renderSvg` and `renderPng`. The SDK does not re-export those three, which a probe confirmed is pre-existing — the SDK re-exports core, schema and assets only — and not a regression from this change.
+
+**Design decisions.** No contract changed; `docs/design/04-components-and-styles.md` already specified these shapes and this implements them as written. `core/src/scene/refs.ts` exists so `scene/` and `components/` share types without importing each other, keeping the two contracts independent.
+
+**Remaining defects.** Unchanged from T04. Reference parity remains 0/6 unreviewed.
+
+**Outstanding gates.** M1 gate open. No human visual review obtained or claimed.
+
+**Next ready task: T06** (versioned font and resource resolution). Its dependencies T02 and T05 are complete.
