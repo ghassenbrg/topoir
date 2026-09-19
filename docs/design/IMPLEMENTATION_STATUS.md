@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-19. This file is the live execution ledger for the design program.
 
-**Program state: in progress. M0 complete. Next task: T07. Current milestone: M1 (T05–T09).**
+**Program state: in progress. M0 complete. Next task: T08. Current milestone: M1 (T05–T09).**
 
 The full review previously verified `bc64cf2`: 91 tests in 15 files passed; 240/240 synthetic cases compiled without hard geometry defects; 220/240 passed the selected defect counters; six reference candidates were deterministic with no approved parity recorded. These are historical baseline observations, not evidence that the tasks below are implemented. The design-writing task added documents/examples only.
 
@@ -17,7 +17,7 @@ Allowed task states: `not_started`, `in_progress`, `implemented_pending_gate`, `
 | T04 | M0 | complete | Capability registry behind CLI+MCP, `TOP252_INTENT_NOT_APPLIED`, hash-bound review records, benchmark counter/shape/acceptance separation, generator consolidation. See session entry. |
 | T05 | M1 | complete | ComponentPlan/blocks/attachments/disposition, SceneDocument and Medium in core; renderer re-exports; three-family fixtures and dependency-direction test. Interfaces only. See session entry. |
 | T06 | M1 | complete | Font registry with face hashes, fallback chains and content-keyed caching; one resolved set reaches measurement, SVG and PNG; `TOP332_GLYPH_NOT_AVAILABLE`. See session entry. |
-| T07 | M1 | not_started | |
+| T07 | M1 | complete | Block measurement engine, bounded width negotiation, true silhouettes and ink bounds, attachment derivation, content accounting. Not yet wired into the pipeline — that is T08. See session entry. |
 | T08 | M1 | not_started | |
 | T09 | M1 | not_started | |
 | T10 | M2 | not_started | |
@@ -597,3 +597,62 @@ the author may knowingly accept while a pack is pending, and the message says wh
 **Outstanding gates.** M1 gate open. No human visual review obtained or claimed.
 
 **Next ready task: T07** (implement the measured block engine). Its dependencies T05 and T06 are complete.
+
+### T07 — measured block engine — 2026-09-20
+
+**Task: T07 — implement the measured block engine. State: complete.**
+
+Baseline commit `28626ed` (T06). No unrelated worktree changes.
+
+**Scope note.** T07 implements the engine behind the T05 contracts. It is not yet wired
+into the compiler: `measureView` and `buildScene` still drive the pipeline, and no rendered
+output changes. **T08** is the migration. Keeping them apart means the engine can be tested
+against its own contract before every existing golden depends on it.
+
+**Behavior implemented.**
+
+1. **Every block type measured** (`core/src/components/measure-blocks.ts`). `text`, `badge`, `asset`, `rule`, `spacer`, `row`, `column`, `grid`, `table`, `stack` and registered `vector`. Measurement is bottom-up and offers each child only the width that actually remains — a row subtracts its own gaps before dividing, so a container cannot promise children more space than it has.
+
+2. **Shaped text the renderer places without re-deriving anything.** Each line carries its own baseline, advance and ink box, computed from the resolved face's real ascent and descent. A test asserts every baseline equals `index * lineHeight + ascent`, which is the property that lets the renderer stop calculating line positions itself — the root cause of a badge measured at one width and drawn at another.
+
+3. **Ink is separated from layout throughout.** A text block's ink overhangs its line boxes by the descent; a stack's ink exceeds its layout box by `offset * (sheets - 1)` in both axes; a spacer reserves space and paints nothing, so a container's ink is the union of what its children actually paint rather than its bounding box. Each of those is asserted. Reserving only the front sheet of a stack is how stacked components came to overlap their neighbours.
+
+4. **Bounded width negotiation** (`core/src/components/negotiate.ts`). `negotiateWidth` tries the preferred width, then a **capped** list of alternatives, and returns the narrowest that keeps all content. When none is clean it returns the widest tried with `exhausted: true` rather than continuing. That is the contract's rule — "cap alternatives and return the best legal result with diagnostics", not "keep expanding until the diagram happens to fit". A component that silently grew would distort every layout around it; one that silently kept the narrow result would lose content; the caller is told which happened.
+
+5. **True silhouettes.** `silhouettePoint` returns points on the actual outline: a diamond attaches at its corners, not at the midpoints of its bounding box, which are outside the shape entirely; a cylinder attaches on its straight body, clear of the bulging caps; a lifeline attaches along its length. This prevents at the source exactly the detached-connector defect T03 added a checker for.
+
+6. **Attachment derivation.** `sideAttachments` spaces several sites along one side so connectors stay distinguishable — a test asserts no two are coincident, which is what makes three relationships read as three lines rather than one thick one. `rowAttachments` derives one site per table row, positioned at that row's vertical centre, so a gateway connector meets the row it is drawn against. The same machinery serves ER field connections.
+
+7. **Content accounting from measurement.** `contentDispositions` walks the tree and reports `rendered`, `abbreviated` (with an exact omitted-grapheme count and a reason naming the width) or `omitted` (for an asset role that did not resolve). Derived from the measurement, never inferred from a missing primitive, as the contract requires.
+
+**Files added:** `packages/core/src/components/measure-blocks.ts`, `negotiate.ts`, `packages/core/test/block-engine.test.ts` (41 assertions). **Changed:** `packages/core/src/components/index.ts`.
+
+**Two bugs found and fixed during implementation, both by the tests:**
+
+- `hasAbbreviatedText` compared a space-stripped source against lines joined without spaces, so **every wrapped run reported as abbreviated**. Since negotiation widens on exactly that signal, it would have widened every multi-line component to its unwrapped width — silently undoing wrapping across the whole corpus. It now compares grapheme counts with whitespace removed, and a test asserts a wrapped run is *not* abbreviated.
+- The grapheme-boundary ellipsis test initially joined `ShapedLine` **objects**, so it asserted `"[object Object]…"` does not contain U+FFFD and passed vacuously. It now joins `line.text`, and additionally asserts the surviving flag emoji are intact. Verified load-bearing by replacing the grapheme segmenter with `[...text]` — the test failed with `expected 1 to be +0` — then restored.
+
+**Verification:**
+
+| Command | Outcome |
+| --- | --- |
+| `pnpm exec vitest run packages/core/test/block-engine.test.ts` | 41 passed |
+| `pnpm check` | build + typecheck clean; **279 tests in 25 files passed** (238 after T06) |
+| inverted-probe on the ellipsis test | fails when grapheme segmentation is replaced by code-unit iteration |
+
+**Acceptance criteria, each with the assertion that covers it:**
+
+- *All legacy content can be expressed once* — text, badge, asset strip, route table, stack and rule blocks all measured; the three-family fixtures from T05 remain green.
+- *Measured badges contain actual content* — a 48-character badge at 200px wraps and its lines rejoin to exactly the authored badge.
+- *Table cells contain actual content* — six cells across three rows, each asserted to be fully inside its own cell rectangle, with rows non-overlapping and columns sized to their widest cell.
+- *Multi-asset strips contain actual content* — six roles laid out side by side, each inside the measured strip; two roles sharing identical bytes stay two blocks.
+- *Explicit ellipsis produces disposition data* — an over-constrained badge yields `abbreviated` with a positive omitted count and a reason.
+- *No renderer reflow is needed* — every line carries its own baseline and advance; asserted.
+
+**Remaining defects.** Unchanged. Reference parity remains **0/6 unreviewed**.
+
+**Outstanding gates.** M1 gate open.
+
+**Next ready task: T08** (migrate renderer and templates to ComponentPlan). Its dependency
+T07 is complete. T08 is where existing goldens can change, and the roadmap requires every
+changed golden to be inspected and explained rather than re-baselined.
