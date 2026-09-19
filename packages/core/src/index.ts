@@ -15,6 +15,7 @@ export * from "./measure.js";
 export * from "./pipeline.js";
 export * from "./quality.js";
 export * from "./quality/scene.js";
+export * from "./quality/acceptance.js";
 export * from "./presentation/plan.js";
 export * from "./style/resolve.js";
 export * from "./semantic.js";

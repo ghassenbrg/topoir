@@ -119,6 +119,32 @@ measured text run carries `source`, a `disposition` of `rendered` or `abbreviate
 `omittedGraphemes` when abbreviated. The view metrics `abbreviatedTextRuns` and
 `omittedGraphemes` total it for the view.
 
+| `TOP460_TEXT_BELOW_MEDIUM_MINIMUM` | Fitting the drawing to the requested medium reduces text below the minimum that medium declares. Legal geometry, unreadable at the size it is for |
+| `TOP461_SCALED_TO_FIT` | The drawing is larger than the medium and was scaled down. A warning when the result is still legible, an error when it is not |
+
+## Acceptance is not the same as an artifact
+
+A result answers three separate questions, and `artifacts.length > 0` answers none of them:
+
+| Field | Question |
+| --- | --- |
+| `quality.valid` | Do the source, its family semantics and its required constraints hold? |
+| `quality.completion` | `complete`, `partial` or `failed` — did the requested work finish? A timeout is never `complete` |
+| `quality.accepted` | Does the selected scene meet the requested quality profile? |
+
+`quality.blockedAt` names the earliest gate that failed, in the fixed order `semantic` →
+`visible` → `legibility` → `contrast` → `fit` → `ownership` → `readability`. The order is the
+same for **every** diagram family, so one family cannot trade away a constraint another
+treats as inviolable. Readability is an optimisation objective and never blocks.
+
+Profiles change the bar, not the drawing: the same document produces the same bytes under
+`draft`, `presentation` and `publication`, and only `accepted` differs. `draft` requires
+truth and completeness; `presentation` adds legibility, contrast, fit and label ownership;
+`publication` raises the contrast requirement to WCAG AA.
+
+Acceptance is computed from violations, so removing diagnostics from a list cannot turn a
+failed result into a successful one. The legacy `ok` keeps its previous meaning.
+
 An absence of these diagnostics is necessary but not sufficient for the [visual acceptance benchmark](visual-benchmark.md).
 
 ## Artifact dimensions

@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-19. This file is the live execution ledger for the design program.
 
-**Program state: in progress. M0 and M1 complete. Next task: T14. Current milestone: M2 (T10–T15).**
+**Program state: in progress. M0 and M1 complete. Next task: T15. Current milestone: M2 (T10–T15).**
 
 The full review previously verified `bc64cf2`: 91 tests in 15 files passed; 240/240 synthetic cases compiled without hard geometry defects; 220/240 passed the selected defect counters; six reference candidates were deterministic with no approved parity recorded. These are historical baseline observations, not evidence that the tasks below are implemented. The design-writing task added documents/examples only.
 
@@ -24,7 +24,7 @@ Allowed task states: `not_started`, `in_progress`, `implemented_pending_gate`, `
 | T11 | M2 | complete | Workspace normalization, entity identity, exact/induced selection, occurrences with required bindings, collapse coverage, v1alpha1 migration with inventory equality. v1alpha2 now compiles. See session entry. |
 | T12 | M2 | complete | Presentation plan with per-field dispositions, normalized medium and audience floors, compiled constraints with contradiction detection. Boundary focus now actually works. See session entry. |
 | T13 | M2 | complete | Style resolution with authored-token tracking, semantic roles surviving focus/muting, surface-aware text colour. Fixed all 9 invisible-text corpus cases with zero golden changes. See session entry. |
-| T14 | M2 | not_started | |
+| T14 | M2 | complete | valid/completion/accepted separated, one gate order for all families, lexicographic candidate vector, absent metrics stay absent. Legacy `ok` preserved. See session entry. |
 | T15 | M2 | not_started | |
 | T16 | M3 | not_started | |
 | T17 | M3 | not_started | |
@@ -1236,3 +1236,56 @@ Reference parity remains **0/6 unreviewed**.
 
 **Next ready task: T14** (V2 acceptance profiles and candidate quality vector). Its
 dependencies T09 and T12 are complete.
+
+### T14 — V2 acceptance profiles and candidate quality vector — 2026-09-20
+
+**Task: T14 — V2 acceptance profiles and candidate quality vector. State: complete.**
+
+Baseline commit `3bb1320` (T13). No unrelated worktree changes.
+
+**Behavior implemented** (`core/src/quality/acceptance.ts`, surfaced as `CompiledView.quality`).
+
+1. **Three questions, answered separately.** `valid` is about the model; `completion` is about whether the work finished; `accepted` is about whether the scene meets the requested bar. `ok` conflated all three, so a caller could not distinguish a diagram that is *correct* from one that is merely *drawable*. The legacy field keeps its previous meaning and is reported alongside.
+
+2. **A timeout can never be `complete`.** Completion is derived from whether the run finished and how many of the requested views were produced, independently of how good the partial result looks.
+
+3. **One gate order for every family**: `semantic` → `visible` → `legibility` → `contrast` → `fit` → `ownership` → `readability`. The review found architecture ranking defect count before score while topology and panels used a weighted score, so one family could trade away a constraint another treated as inviolable. `blockedAt` names the **earliest** failing gate, not the loudest. Readability is an optimisation objective and never blocks — crossings and density are things to minimise, not limits to fail on.
+
+4. **Profiles change the bar, not the drawing.** A test asserts the same document produces **byte-identical artifacts** under `draft` and `publication`, with only `accepted` differing. `draft` requires truth and completeness; `presentation` adds legibility, contrast, fit and ownership; `publication` raises contrast to WCAG AA.
+
+5. **Acceptance cannot be suppressed.** It is computed from violations, so removing diagnostics from a list does not turn a failure into a success.
+
+6. **The candidate vector is lexicographic, not weighted.** Eight terms, each considered only when every earlier one ties, with the candidate id breaking exact ties so the winner is reproducible. A weighted score is exactly what lets a candidate buy its way past a hard rule by scoring well elsewhere; a test asserts a candidate with `readability: 10000` beats one with a single semantic failure, and that a beautiful candidate which drops a relationship loses to a plain one that keeps everything.
+
+7. **Absent metrics stay absent.** A metric the compiler did not report is omitted from the grouped report rather than defaulting to zero. T04 removed that conflation from the benchmarks; this keeps it out of the result contract, where a missing check reading as a clean score is how an unimplemented gate becomes a passing grade. A reported zero is kept; an unreported one is absent, and a test distinguishes them.
+
+**Files added:** `core/src/quality/acceptance.ts`, `core/test/acceptance.test.ts` (24
+assertions). **Changed:** `core/src/index.ts`, `sdk/src/index.ts` (`CompileOptions.profile`,
+`CompiledView.quality`), `schema/src/diagnostics.ts` (`TOP460`, `TOP461`),
+`sdk/test/review-regression.test.ts` (+4), `docs/diagnostics.md`.
+
+**Verification:**
+
+| Command | Outcome |
+| --- | --- |
+| `pnpm exec vitest run packages/core/test/acceptance.test.ts` | 24 passed |
+| `pnpm check` | build + typecheck clean; **465 tests in 33 files passed** (437 after T13) |
+| render comparison | all 20 byte-identical |
+
+**Acceptance:**
+
+- *Artifact existence never implies acceptance* — asserted end-to-end on the seed-154 ribbon: the artifact exists, geometry is legal, `valid` is true, `completion` is complete, and `accepted` is **false** with a named blocking gate.
+- *Missing metrics are not zero* — asserted in both directions.
+- *All families use the same hard-rule ordering* — one `GATE_ORDER` constant, no family parameter.
+- *Profile failures produce diagnostic previews* — a rejected result still carries its artifact and its violations, rather than returning nothing.
+
+**Carried work.** `candidateVector` and `rankCandidates` define the contract and are tested
+against adversarial pairs, but the compiler still produces **one** candidate, so nothing
+ranks yet. Generating a shortlist is **T19**; `composition.candidates` is reported as
+unsupported by T12 and this does not change that. The `stabilityCost` term is defined and
+always zero until **T29** supplies prior geometry.
+
+**Remaining defects.** Unchanged from T13: one generated case with a clipped edge label
+(T18/T19), 20 soft geometry failures. Reference parity remains **0/6 unreviewed**.
+
+**Next ready task: T15** (separate composition from ELK translation), which closes M2.

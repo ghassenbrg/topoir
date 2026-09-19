@@ -606,3 +606,58 @@ describe("review regression: the scene the reader receives", () => {
     expect(view.metrics.clippedMarks).toBe(0);
   });
 });
+
+describe("review regression: an artifact is not an acceptance", () => {
+  /**
+   * T14. The review's sharpest point about the result contract: "An artifact can exist
+   * without acceptance." `ok` conflated three questions, so a caller could not tell a
+   * diagram that is *correct* from one that is merely *drawable*.
+   */
+  it("produces an artifact for a diagram it does not accept", async () => {
+    const { result, view } = await compileFixture("ribbon-seed-154");
+    // The drawing exists and is geometrically legal.
+    expect(result.artifacts.length).toBeGreaterThan(0);
+    // At a real page size it is unreadable, and the report says so rather than implying
+    // success from the artifact's existence.
+    const reevaluated = await new TopoIRCompiler().compile(await fixture("ribbon-seed-154"), {
+      format: "svg",
+      profile: "presentation",
+    });
+    const quality = reevaluated.views[0]?.quality;
+    expect(quality).toBeDefined();
+    expect(quality?.valid).toBe(true);
+    expect(quality?.completion).toBe("complete");
+    // 46:1 at a default medium: the aspect check fires, so it is not accepted.
+    expect(quality?.accepted).toBe(false);
+    expect(quality?.blockedAt).toBeDefined();
+    void view;
+  });
+
+  it("answers valid, completion and accepted separately on a clean diagram", async () => {
+    const { result, view } = await compileFixture("shared-endpoints");
+    expect(result.ok).toBe(true);
+    expect(view.quality.valid).toBe(true);
+    expect(view.quality.completion).toBe("complete");
+    expect(view.quality.accepted).toBe(true);
+    // The legacy field keeps its old meaning alongside the new ones.
+    expect(result.ok).toBe(view.quality.accepted);
+  });
+
+  it("changes acceptance with the profile without changing the drawing", async () => {
+    const source = await fixture("shared-endpoints");
+    const compiler = new TopoIRCompiler();
+    const draft = await compiler.compile(source, { format: "svg", profile: "draft" });
+    const publication = await compiler.compile(source, { format: "svg", profile: "publication" });
+    // Same bytes. A profile is a question about the result, not an instruction to change it.
+    expect(publication.artifacts[0]?.sha256).toBe(draft.artifacts[0]?.sha256);
+    expect(draft.views[0]?.quality.profile).toBe("draft");
+    expect(publication.views[0]?.quality.profile).toBe("publication");
+  });
+
+  it("reports a semantic failure as invalid, not merely unaccepted", async () => {
+    const dropped = await compileWithGeometry("annotated-regions", (geometry) => ({ ...geometry, annotations: [] }));
+    const quality = dropped.views[0]?.quality;
+    expect(quality?.accepted).toBe(false);
+    expect(quality?.violations.some((violation) => violation.code === "TOP416_ANNOTATION_DROPPED")).toBe(true);
+  });
+});

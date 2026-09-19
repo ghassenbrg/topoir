@@ -6,6 +6,7 @@ import {
   analyzeScene,
   analyzeVisibility,
   compilePresentation,
+  evaluateAcceptance,
   loadWorkspace,
   projectWorkspaceView,
   bundledFontTextMeasurer,
@@ -22,6 +23,8 @@ import {
   type LayoutEngine,
   type ComponentPlan,
   type MeasuredView,
+  type QualityProfile,
+  type QualityReportV2,
   type NormalizedDocument,
   type TextMeasurer,
   type ViewGraph,
@@ -43,6 +46,13 @@ export type OutputFormat = "svg" | "png" | "both";
 
 export interface CompileOptions {
   readonly source?: string;
+  /**
+   * The quality bar the result is judged against. `presentation` by default.
+   *
+   * A profile changes what *acceptance* means, never what is drawn: the same document
+   * produces the same artifact under every profile, and only `quality.accepted` differs.
+   */
+  readonly profile?: QualityProfile;
   readonly view?: string | readonly string[] | "all";
   readonly format?: OutputFormat;
   readonly png?: PngOptions;
@@ -91,6 +101,13 @@ export interface CompiledView {
   readonly geometry: GeometryView;
   readonly scene: Scene;
   readonly metrics: Readonly<Record<string, number>>;
+  /**
+   * The V2 quality report (T14): `valid`, `completion` and `accepted` answered separately.
+   *
+   * An artifact can exist without acceptance, so `artifacts.length > 0` says nothing about
+   * whether the diagram is any good. Ask `quality.accepted`.
+   */
+  readonly quality: QualityReportV2;
   /**
    * One `ComponentPlan` per placed component (T08).
    *
@@ -306,13 +323,27 @@ export class TopoIRCompiler {
         const fallback = drawn === 0 && assets.resolve(node.kind) !== undefined ? 1 : drawn;
         return [planForNode(node, { theme, bounds }, incident.get(node.id) ?? 2, fallback)];
       });
+      const viewMetrics = { ...layout.metrics, ...quality.metrics, ...content.metrics, ...visibility.metrics, ...sceneQuality.metrics, minimumTextSize: presentation.plan.minimumTextSize };
+      // Acceptance is computed from the violations, not from their absence in a list the
+      // caller controls, so suppressing diagnostics cannot turn a failure into a success.
+      const acceptance = evaluateAcceptance({
+        ...(options.profile === undefined ? {} : { profile: options.profile }),
+        diagnostics: [...quality.diagnostics, ...content.diagnostics, ...visibility.diagnostics, ...sceneQuality.diagnostics, ...presentation.diagnostics],
+        metrics: viewMetrics,
+        medium: presentation.plan.medium,
+        drawing: { width: scene.width, height: scene.height },
+        baseTextSize: theme.font.labelSize,
+        requestedViews: viewIds.length,
+        producedViews: viewIds.length,
+      });
       const compiled: CompiledView = {
         view,
         measured,
         geometry: layout.geometry,
         scene,
+        quality: acceptance,
         plans,
-        metrics: { ...layout.metrics, ...quality.metrics, ...content.metrics, ...visibility.metrics, ...sceneQuality.metrics, minimumTextSize: presentation.plan.minimumTextSize },
+        metrics: viewMetrics,
       };
       compiledViews.push(compiled);
 
