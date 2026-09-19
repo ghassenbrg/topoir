@@ -385,10 +385,17 @@ function diagnostic(
   };
 }
 
+/**
+ * Explicitly ranked siblings come first in their declared rank, then unranked siblings by
+ * ID. An absent `order` means "unranked", not `order: 0`; conflating the two let one
+ * ranked item sink below unrelated unranked siblings and silently broke author intent.
+ */
 function stableSort<T extends { readonly id: string; readonly order?: number }>(items: readonly T[]): T[] {
   return [...items].sort((left, right) => {
-    const byOrder = (left.order ?? 0) - (right.order ?? 0);
-    return byOrder === 0 ? left.id.localeCompare(right.id, "en") : byOrder;
+    const leftRank = left.order ?? Number.POSITIVE_INFINITY;
+    const rightRank = right.order ?? Number.POSITIVE_INFINITY;
+    if (leftRank !== rightRank) return leftRank - rightRank;
+    return left.id.localeCompare(right.id, "en");
   });
 }
 

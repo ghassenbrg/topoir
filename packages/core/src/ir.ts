@@ -105,6 +105,14 @@ export interface Rect extends Point, Size {}
 
 export interface MeasuredPort extends NormalizedPort {
   readonly owner: string;
+  readonly labelText?: MeasuredText;
+  /**
+   * The measured attachment slot for a visible internal compartment, relative to the
+   * owning component's origin. Layout pins the port to this slot and the renderer draws
+   * the compartment at the same rectangle, so the drawn route table and the geometry
+   * the connectors attach to cannot drift apart.
+   */
+  readonly slot?: Rect;
 }
 
 export interface MeasuredText extends Size {
@@ -117,6 +125,7 @@ export interface MeasuredNode extends NormalizedNode, Size {
   readonly labelText: MeasuredText;
   readonly descriptionText?: MeasuredText;
   readonly imageSize?: Size;
+  readonly assetSizes?: readonly Size[];
 }
 
 export interface MeasuredGroup extends NormalizedGroup {

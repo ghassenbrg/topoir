@@ -215,3 +215,23 @@ export function nodeShape(node: { kind: NodeKind; visual?: NodeVisual }, theme: 
   }
   return "card";
 }
+
+/**
+ * The ordered asset references a component displays.
+ *
+ * An explicit `visual.assets` list is the complete, author-owned set of asset
+ * roles for the component. When it is absent the single automatic asset is
+ * resolved from the usual priority chain. Measurement and rendering must both
+ * call this so a component can never be measured for one asset and drawn with
+ * another.
+ */
+export function assetReferences(node: {
+  kind: NodeKind;
+  icon?: string | undefined;
+  technology?: string | undefined;
+  visual?: NodeVisual | undefined;
+}): readonly string[] {
+  const explicit = node.visual?.assets ?? [];
+  if (explicit.length > 0) return [...new Set(explicit)];
+  return [node.visual?.asset ?? node.icon ?? node.technology ?? node.kind];
+}

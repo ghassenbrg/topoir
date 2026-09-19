@@ -1,0 +1,64 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata: { name: agent-request-path, title: One request path across four trust zones. }
+model:
+  groups:
+    - { id: internet, kind: external-zone, label: Internet zone, order: 0, layout: { mode: row, gap: 100 } }
+    - { id: gcp, kind: cloud, label: GCP zone, order: 1, layout: { mode: grid, columns: 2, gap: 80 } }
+    - { id: application, kind: security-boundary, label: Agent application, parent: gcp, order: 0, layout: { mode: grid, columns: 3, gap: 80 } }
+    - { id: fdc, kind: security-boundary, label: FDC zone, order: 2, layout: { mode: row, gap: 80 } }
+    - { id: external, kind: external-zone, label: External locations, order: 3, layout: { mode: row } }
+  nodes:
+    - { id: customer, kind: client, label: Customer, description: Mobile or browser, group: internet, order: 0, visual: { asset: 'lucide:mouse-pointer-click' } }
+    - { id: edge, kind: gateway, label: Edge acceleration, description: /ai-agent/*, group: internet, order: 1, visual: { asset: 'lucide:globe' } }
+    - id: lb
+      kind: load-balancer
+      label: Global load balancer
+      group: gcp
+      order: 0
+      ports:
+        - { id: app, label: '/ai-agent/app/*', side: east, kind: output }
+        - { id: api, label: '/ai-agent/api/*', side: east, kind: output }
+      visual: { asset: 'lucide:git-fork', portLabels: inside }
+    - { id: webapp, kind: pod, label: Web application, group: application, order: 0, visual: { assets: ['k8s:pod', 'lucide:panels-top-left'], replicas: 3 } }
+    - { id: frontend, kind: pod, label: Agent front, group: application, order: 1, visual: { assets: ['k8s:pod', 'lucide:braces'], replicas: 3 } }
+    - { id: core, kind: pod, label: Agent core, group: application, order: 2, visual: { assets: ['k8s:pod', 'lucide:brain-circuit'], replicas: 4, emphasis: primary } }
+    - { id: redis, kind: cache, label: Session cache, group: application, order: 3, technology: redis }
+    - { id: postgres, kind: database, label: Context store, group: application, order: 4, technology: postgresql }
+    - { id: remote-api, kind: api, label: Remote API, group: gcp, order: 1 }
+    - { id: remote-cluster, kind: kubernetes-service, label: Internal cluster, group: gcp, order: 2, visual: { badge: /agent/internal/* } }
+    - { id: f5, kind: load-balancer, label: F5 gateway, group: fdc, order: 0, visual: { asset: 'lucide:shield-check' } }
+    - { id: card-core, kind: database, label: CARD_CORE, group: fdc, order: 1, visual: { status: warning } }
+    - { id: amaor, kind: external-system, label: AMAOR API, group: fdc, order: 2 }
+    - { id: partner, kind: external-system, label: Partner APIs, group: external, order: 0 }
+  flows:
+    - { id: request, label: Primary request, color: '#111827', style: solid }
+    - { id: state, label: Session and context, color: '#64748B', style: dashed }
+    - { id: branch, label: External dependency, color: '#7C3AED', style: solid }
+  edges:
+    - { id: open, from: customer, to: edge, label: '/ai-agent/*', kind: request, flow: request, emphasis: primary }
+    - { id: accelerate, from: edge, to: lb, label: HTTPS, kind: request, flow: request, emphasis: primary }
+    - { id: route, from: lb, to: frontend, kind: request, flow: request, emphasis: primary }
+    - { id: app-route, from: lb, to: webapp, kind: request, flow: request }
+    - { id: invoke, from: frontend, to: core, label: Request, kind: request, flow: request, emphasis: primary }
+    - { id: session, from: frontend, to: redis, label: Session, kind: write, flow: state }
+    - { id: context, from: core, to: postgres, label: Context, kind: write, flow: state }
+    - { id: remote, from: core, to: remote-api, label: Service request, kind: request, flow: branch }
+    - { id: cluster, from: core, to: remote-cluster, label: Internal endpoint, kind: request, flow: branch }
+    - { id: legacy, from: core, to: f5, label: mTLS, kind: request, flow: request, emphasis: primary }
+    - { id: legacy-db, from: f5, to: card-core, label: SQL, kind: write, flow: request }
+    - { id: amaor-call, from: core, to: amaor, label: API, kind: request, flow: branch }
+    - { id: partner-call, from: core, to: partner, label: Partner request, kind: request, flow: branch }
+  annotations:
+    - { id: internal-note, kind: note, text: The internal cluster exposes the same components through a private agent endpoint., anchor: remote-cluster }
+views:
+  - id: overview
+    theme: technical-clean
+    showLegend: true
+    layout: { direction: right, spacing: normal, aspectRatio: 2.1 }
+    design:
+      composition: architecture-map
+      audience: engineering
+      takeaway: The black request spine crosses each trust boundary once; state and remote branches remain secondary.
+      focus: [core]
+      story: [open, accelerate, route, invoke, legacy, legacy-db]

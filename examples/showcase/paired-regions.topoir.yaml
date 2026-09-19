@@ -3,25 +3,53 @@ kind: Architecture
 metadata: { name: regional-resilience, title: Two regions. One recovery strategy. }
 model:
   groups:
-    - { id: primary, kind: region, label: '01 / Tokyo · primary', order: 0 }
-    - { id: recovery, kind: region, label: '02 / Osaka · recovery', order: 1 }
+    - { id: primary, kind: region, label: '01 / Tokyo · primary', order: 0, layout: { mode: column, gap: 44 } }
+    - { id: primary-vpc, kind: vpc, label: Production VPC, parent: primary, order: 0 }
+    - { id: recovery, kind: region, label: '02 / Osaka · recovery', order: 1, layout: { mode: column, gap: 44 } }
+    - { id: recovery-vpc, kind: vpc, label: Recovery VPC, parent: recovery, order: 0 }
   nodes:
-    - { id: api-a, kind: pod, technology: kubernetes, label: Application fleet, group: primary, order: 0, visual: { badge: SERVING TRAFFIC } }
-    - { id: api-b, kind: pod, technology: kubernetes, label: Standby fleet, group: recovery, order: 0, visual: { badge: WARM STANDBY } }
-    - { id: db-a, kind: database, technology: postgresql, label: Primary database, group: primary, order: 1 }
-    - { id: db-b, kind: database, technology: postgresql, label: Read replica, group: recovery, order: 1 }
-    - { id: store-a, kind: object-storage, label: Object storage, group: primary, order: 2 }
-    - { id: store-b, kind: object-storage, label: Recovery storage, group: recovery, order: 2 }
+    - { id: dns, kind: cloud-service, label: Global DNS, technology: 'aws route53', order: 0, visual: { badge: HEALTH ROUTING } }
+    - { id: access, kind: gateway, label: Multi-region access point, technology: 'aws cloudfront', order: 1 }
+    - { id: alb-a, kind: load-balancer, label: Application load balancer, group: primary-vpc, order: 0, visual: { asset: 'lucide:git-fork' } }
+    - { id: api-a, kind: container, label: Application containers, group: primary-vpc, order: 1, visual: { badge: SERVING TRAFFIC, replicas: 6, assets: ['lucide:container', 'lucide:cpu'] } }
+    - { id: transit-a, kind: gateway, label: Transit gateway, group: primary-vpc, order: 2, visual: { asset: 'lucide:network' } }
+    - { id: store-a, kind: object-storage, label: Object storage, group: primary, order: 1, visual: { asset: 'lucide:archive' } }
+    - { id: registry-a, kind: object-storage, label: Container registry, group: primary, order: 2, visual: { asset: 'lucide:package' } }
+    - { id: db-a, kind: cache, label: Redis global primary, group: primary, order: 3, technology: redis }
+    - { id: secrets-a, kind: cloud-service, label: Secrets manager, group: primary, order: 4, visual: { asset: 'lucide:key-round' } }
+    - { id: alb-b, kind: load-balancer, label: Application load balancer, group: recovery-vpc, order: 0, visual: { asset: 'lucide:git-fork' } }
+    - { id: api-b, kind: container, label: Standby containers, group: recovery-vpc, order: 1, visual: { badge: WARM STANDBY, replicas: 6, assets: ['lucide:container', 'lucide:cpu'] } }
+    - { id: transit-b, kind: gateway, label: Transit gateway, group: recovery-vpc, order: 2, visual: { asset: 'lucide:network' } }
+    - { id: store-b, kind: object-storage, label: Recovery storage, group: recovery, order: 1, visual: { asset: 'lucide:archive' } }
+    - { id: registry-b, kind: object-storage, label: Replica registry, group: recovery, order: 2, visual: { asset: 'lucide:package' } }
+    - { id: db-b, kind: cache, label: Redis global replica, group: recovery, order: 3, technology: redis }
+    - { id: secrets-b, kind: cloud-service, label: Secrets manager, group: recovery, order: 4, visual: { asset: 'lucide:key-round' } }
   flows:
+    - { id: traffic, label: Global traffic, color: '#0891B2', style: solid }
     - { id: sync, label: Continuous replication, color: '#7C3AED', style: dashed }
+    - { id: network, label: Private network, color: '#64748B', style: dotted }
   edges:
+    - { id: dns-a, from: dns, to: alb-a, label: Healthy target, flow: traffic, emphasis: primary }
+    - { id: dns-b, from: dns, to: alb-b, label: Failover target, flow: traffic, emphasis: secondary }
+    - { id: serve-a, from: alb-a, to: api-a, label: Forward requests, flow: traffic }
+    - { id: serve-b, from: alb-b, to: api-b, label: Forward requests, flow: traffic }
+    - { id: access-a, from: access, to: store-a, label: Read nearest object, flow: traffic }
+    - { id: access-b, from: access, to: store-b, label: Read nearest object, flow: traffic }
+    - { id: attach-a, from: api-a, to: transit-a, label: VPC attachment, flow: network }
+    - { id: attach-b, from: api-b, to: transit-b, label: VPC attachment, flow: network }
     - { id: deploy, from: api-a, to: api-b, label: Same signed image, flow: sync }
-    - { id: wal, from: db-a, to: db-b, label: WAL stream, flow: sync }
-    - { id: copy, from: store-a, to: store-b, label: Object replication, flow: sync }
-    - { id: write-a, from: api-a, to: db-a, kind: write, emphasis: secondary }
-    - { id: write-b, from: api-b, to: db-b, kind: read, emphasis: secondary }
+    - { id: wal, from: db-a, to: db-b, label: Global datastore, flow: sync }
+    - { id: copy, from: store-a, to: store-b, label: Cross-region replication, flow: sync }
+    - { id: registry-copy, from: registry-a, to: registry-b, label: Image replication, flow: sync }
+    - { id: peering, from: transit-a, to: transit-b, label: Transit peering, flow: network }
+    - { id: secret-copy, from: secrets-a, to: secrets-b, label: Secret replication, flow: sync }
 views:
   - id: overview
     theme: cloud-architecture
     showLegend: true
-    design: { composition: comparison, audience: presentation, takeaway: Replicate state continuously; promote the recovery region only when needed. }
+    design:
+      composition: comparison
+      audience: presentation
+      takeaway: Global entry services steer traffic while compute, objects, images, cache and secrets remain regionally recoverable.
+      focus: [dns, api-a, api-b]
+      story: [dns-a, serve-a, deploy, dns-b]

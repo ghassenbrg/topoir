@@ -61,9 +61,21 @@ views:
       optimize: true
 ```
 
-`composition`: `topology`, `layers` (downward by default), `sequence`, `swimlanes`, or `comparison`. `audience`: `engineering`, `executive`, or `presentation` (advisory). `focus` references nodes; `story` is an ordered list of edge IDs. References must exist. Keep referenced items in the selected view. Story controls emphasis/numbering, not a hard placement constraint yet. Sequence chronology comes from edge `step`, then `order`, then stable ID.
+`composition`: `topology`, `layers` (downward by default), `sequence`, `swimlanes`, `comparison`, or `architecture-map`. `audience`: `engineering`, `executive`, or `presentation` (advisory). `focus` references nodes; `story` is an ordered list of edge IDs. References must exist. Keep referenced items in the selected view. Story controls emphasis/numbering, not a hard placement constraint yet. Sequence chronology comes from edge `step`, then `order`, then stable ID.
 
-Node `visual` supports `shape` (`auto`, `card`, `icon`, `cylinder`, `stack`, `pill`, `diamond`, `image`), `emphasis` (`primary`, `secondary`, `muted`), `status` (`normal`, `success`, `failure`, `warning`), a text `badge`, integer `replicas`, and an inventory `asset` reference. Replicas are a visual summary, not expanded independently addressable nodes. Edges support the same emphasis/status vocabulary and integer `step`.
+Node `visual` supports `shape` (`auto`, `card`, `icon`, `cylinder`, `stack`, `pill`, `diamond`, `image`), `emphasis` (`primary`, `secondary`, `muted`), `status` (`normal`, `success`, `failure`, `warning`), a text `badge` (48 characters), integer `replicas`, and inventory artwork. Replicas are a visual summary, not expanded independently addressable nodes. Edges support the same emphasis/status vocabulary and integer `step`.
+
+### Component artwork
+
+`visual.asset` names one inventory entry. `visual.assets` names an ordered list of up to six asset roles — for example a platform marker plus the component's own logo — and when it is present it is the complete list for that component, so a separate `visual.asset` is reported as overridden (`TOP323_ASSET_OVERRIDDEN`) rather than silently dropped. When neither is given, one asset is resolved from `icon`, then `technology`, then the semantic kind. Up to five roles are drawn side by side and every drawn role is attributed in the export metadata.
+
+### Internal route compartments
+
+`visual.portLabels: inside` draws a component's declared `ports` as labeled compartments inside the component — a gateway's route table, not an infrastructure boundary. Each compartment is measured before layout, the connector that names the port through `sourcePort`/`targetPort` is pinned to that compartment's own edge, and the renderer draws the same measured rectangle, so the visible route table and the attachment geometry cannot drift apart. Compartments widen the component rather than clipping a long route label. Explicit ports remain unsupported in the experimental `sequence`, `swimlanes`, `comparison` and `architecture-map` families, which report `TOP402_COMPOSITION_PORT_UNSUPPORTED` instead of ignoring them.
+
+### Sibling order
+
+`order` is available on groups, nodes, ports, edges, flows and annotations. Explicitly ranked siblings come first in their declared rank; unranked siblings follow in stable ID order. An absent `order` means "unranked", not `order: 0`. Rank is a deterministic input to layout, not a coordinate: in the `topology` and `layers` families the layout engine may still reorder items within a layer to reduce crossings.
 
 Available themes: `technical-clean`, `cloud-architecture`, `executive`, `dark-engineering`, `blueprint`, `whiteboard`, `minimal`. They affect component shape, dimensions, icon treatment, typography, connector radius, boundary treatment and palette. Composition remains an independent choice. Whiteboard is an initial grammar, not full illustrated sketch rendering; isometric, insets, arbitrary decorative regions and mixed-language subregions are not implemented.
 

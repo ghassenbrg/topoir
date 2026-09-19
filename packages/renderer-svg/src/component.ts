@@ -1,4 +1,4 @@
-import { nodeShape, type MeasuredNode, type GeometryNode, type Point, type TopoIRTheme } from "@topoir/core";
+import { assetReferences, nodeShape, type MeasuredNode, type GeometryNode, type Point, type TopoIRTheme } from "@topoir/core";
 import type { AssetRegistry } from "@topoir/assets";
 import type { SceneElement, SceneGroup, SceneRect } from "./scene.js";
 import { iconScene } from "./icons.js";
@@ -11,6 +11,8 @@ export function nodeComponent(node: MeasuredNode, geometry: GeometryNode, offset
   const x = geometry.x + offset.x, y = geometry.y + offset.y, w = geometry.width, h = geometry.height;
   const badge = node.visual?.badge ?? (node.visual?.replicas === undefined ? undefined : `${node.visual.replicas} replicas`);
   const badgeHeight = badge ? 24 : 0;
+  const showPorts = node.visual?.portLabels === "inside" && node.ports.length > 0;
+  const portPanelHeight = showPorts ? 12 + node.ports.reduce((sum, port) => sum + Math.max(28, (port.labelText?.height ?? 0) + 12), 0) : 0;
   const vertical = shape === "icon" || shape === "image";
   const fill = basePaint.fill;
   const base: SceneRect = { type: "rect", x, y, width: w, height: h, rx: shape === "pill" ? h / 2 : theme.node.radius, fill, stroke: accent, strokeWidth: focus ? 2.6 : 1.4 };
@@ -30,19 +32,37 @@ export function nodeComponent(node: MeasuredNode, geometry: GeometryNode, offset
     children.push({ ...base, fill: "none", strokeWidth: 2, rx: 12 });
   }
   const size = theme.node.iconSize;
-  const asset = assets.resolve(node.visual?.asset ?? node.icon ?? node.technology ?? node.kind, accent) ?? assets.resolve(node.kind, accent);
+  const resolvedAssets = [...new Map(assetReferences(node).map((reference) => assets.resolve(reference, accent)).filter((value) => value !== undefined).map((value) => [value.id, value])).values()].slice(0, 5);
+  const asset = resolvedAssets[0] ?? assets.resolve(node.kind, accent);
   const iconBoxWidth = node.imageSize?.width ?? (shape === "image" ? w - 32 : size);
   const iconBoxHeight = node.imageSize?.height ?? (shape === "image" ? Math.max(size, h - node.labelText.height - (node.descriptionText?.height ?? 0) - 48 - badgeHeight) : size);
   const iconX = vertical ? x + (w - iconBoxWidth) / 2 : x + theme.spacing.nodePaddingX + (shape === "diamond" ? 14 : 0);
-  const iconY = vertical ? y + 14 : y + (h - badgeHeight - size) / 2 + (shape === "cylinder" ? 6 : 0);
-  if (asset?.collection === "devicon" && (theme.id === "dark-engineering" || theme.id === "blueprint")) children.push({ type: "rect", x: iconX - 4, y: iconY - 4, width: iconBoxWidth + 8, height: iconBoxHeight + 8, rx: 6, fill: "#F8FAFC" });
-  if (asset) children.push({ type: "image", x: iconX, y: iconY, width: iconBoxWidth, height: iconBoxHeight, href: asset.dataUri, title: asset.name });
-  else children.push(iconScene(node.kind, iconX, iconY, size, accent));
+  const iconY = vertical ? y + 14 : y + (h - badgeHeight - portPanelHeight - size) / 2 + (shape === "cylinder" ? 6 : 0);
+  const displayedAssets = resolvedAssets.length ? resolvedAssets : asset ? [asset] : [];
+  const assetIconWidth = displayedAssets.length > 1 ? size : iconBoxWidth;
+  const assetStrip = displayedAssets.length * assetIconWidth + Math.max(0, displayedAssets.length - 1) * 8;
+  const stripX = vertical ? x + (w - assetStrip) / 2 : iconX;
+  if (displayedAssets.length) {
+    for (const [index, resolved] of displayedAssets.entries()) {
+      const assetX = stripX + index * (assetIconWidth + 8);
+      if (resolved.collection === "devicon" && (theme.id === "dark-engineering" || theme.id === "blueprint")) children.push({ type: "rect", x: assetX - 4, y: iconY - 4, width: assetIconWidth + 8, height: iconBoxHeight + 8, rx: 6, fill: "#F8FAFC" });
+      children.push({ type: "image", x: assetX, y: iconY, width: assetIconWidth, height: iconBoxHeight, href: resolved.dataUri, title: resolved.name });
+    }
+  } else children.push(iconScene(node.kind, iconX, iconY, size, accent));
   const totalTextHeight = node.labelText.height + (node.descriptionText === undefined ? 0 : 6 + node.descriptionText.height);
-  const textTop = vertical ? iconY + iconBoxHeight + 12 : y + (h - badgeHeight - totalTextHeight) / 2 + (shape === "cylinder" ? 6 : 0);
-  const textX = vertical ? x + w / 2 : iconX + size + 12;
+  const textTop = vertical ? iconY + iconBoxHeight + 12 : y + (h - badgeHeight - portPanelHeight - totalTextHeight) / 2 + (shape === "cylinder" ? 6 : 0);
+  const textX = vertical ? x + w / 2 : iconX + Math.max(size, displayedAssets.length * (size + 8) - 8) + 12;
   children.push({ type: "text", x: textX, y: textTop + theme.font.labelSize, lines: node.labelText.lines, lineHeight: node.labelText.lineHeight, fill: basePaint.text, fontSize: theme.font.labelSize, fontWeight: focus ? 700 : 600, ...(vertical ? { anchor: "middle" } : {}) });
   if (node.descriptionText) children.push({ type: "text", x: textX, y: textTop + node.labelText.height + 6 + theme.font.descriptionSize, lines: node.descriptionText.lines, lineHeight: node.descriptionText.lineHeight, fill: theme.canvas.muted, fontSize: theme.font.descriptionSize, ...(vertical ? { anchor: "middle" } : {}) });
+  if (showPorts) {
+    // Drawn from the same measured slots that layout pinned the ports to.
+    for (const port of node.ports) {
+      const slot = port.slot;
+      if (slot === undefined) continue;
+      children.push({ type: "rect", x: x + slot.x, y: y + slot.y, width: slot.width, height: slot.height, rx: 7, fill: theme.canvas.background, stroke: accent, strokeWidth: 1 });
+      children.push({ type: "text", x: x + slot.x + slot.width / 2, y: y + slot.y + slot.height / 2 + theme.font.descriptionSize * 0.36, lines: port.labelText?.lines ?? [port.label], lineHeight: port.labelText?.lineHeight ?? theme.font.descriptionSize * 1.2, fill: basePaint.text, fontSize: theme.font.descriptionSize, fontWeight: 600, anchor: "middle" });
+    }
+  }
   if (badge) {
     children.push({ type: "rect", x: x + 12, y: y + h - 26, width: w - 24, height: 19, rx: 4, fill: theme.canvas.background });
     children.push({ type: "text", x: x + w / 2, y: y + h - 12, lines: [badge], lineHeight: 12, fontSize: 10, fontWeight: 600, fill: accent, anchor: "middle" });

@@ -13,11 +13,6 @@ model:
     - id: cluster
       kind: kubernetes-cluster
       label: VM — K8S — default cluster
-    - id: ingress
-      kind: logical
-      label: Ingress & routes
-      parent: cluster
-      layout: { mode: column }
     - id: pockito-workloads
       kind: namespace
       label: Pockito workloads
@@ -49,40 +44,54 @@ model:
     - id: traefik
       kind: gateway
       label: Traefik
-      description: /app/* · /api/* · /mcp/*
-      group: ingress
+      group: cluster
       technology: traefik
+      ports:
+        - { id: app, label: '/app/*', side: east, kind: output, order: 0 }
+        - { id: api, label: '/api/*', side: east, kind: output, order: 1 }
+        - { id: mcp, label: '/mcp/*', side: east, kind: output, order: 2 }
+      visual: { assets: ['k8s:ingress', 'lucide:waypoints'], portLabels: inside, emphasis: primary }
     - id: pockito-webapp
       kind: pod
+      order: 0
       label: Pockito-webapp
       group: pockito-workloads
+      visual: { replicas: 2, assets: ['k8s:pod', 'lucide:panels-top-left'] }
     - id: pockito-api
       kind: pod
+      order: 1
       label: Pockito-api
       group: pockito-workloads
+      visual: { replicas: 3, assets: ['k8s:pod', 'lucide:braces'] }
     - id: pockito-mcp
       kind: pod
+      order: 2
       label: Pockito-mcp
       group: pockito-workloads
+      visual: { replicas: 2, assets: ['k8s:pod', 'lucide:bot'] }
     - id: pockito-core
       kind: pod
       label: Pockito-core
       description: Pockito
       group: platform-services
+      visual: { replicas: 3, assets: ['k8s:pod', 'lucide:component'], emphasis: primary }
     - id: dify
       kind: pod
       label: Dify
       group: platform-services
+      visual: { replicas: 2, assets: ['k8s:pod', 'lucide:workflow'] }
     - id: keycloak
       kind: identity-provider
       label: Keycloak
       group: platform-services
       technology: keycloak
+      visual: { assets: ['k8s:pod', 'lucide:fingerprint-pattern'] }
     - id: seaweedfs
       kind: filesystem
       label: SeaweedFS
       group: platform-services
       technology: seaweedfs
+      visual: { assets: ['k8s:pod', 'lucide:hard-drive'] }
     - id: redis
       kind: cache
       label: Redis
@@ -118,9 +127,9 @@ model:
     - { id: mobile-traefik, from: mobile-app, to: traefik, kind: request, flow: client-traffic, label: HTTPS }
     - { id: web-traefik, from: web-app, to: traefik, kind: request, flow: client-traffic, label: HTTPS }
     - { id: agent-traefik, from: ai-agent, to: traefik, kind: request, flow: client-traffic, label: HTTPS }
-    - { id: traefik-webapp, from: traefik, to: pockito-webapp, kind: request, flow: app-routing, label: /app/* }
-    - { id: traefik-api, from: traefik, to: pockito-api, kind: request, flow: app-routing, label: /api/* }
-    - { id: traefik-mcp, from: traefik, to: pockito-mcp, kind: request, flow: app-routing, label: /mcp/* }
+    - { id: traefik-webapp, from: traefik, to: pockito-webapp, sourcePort: app, kind: request, flow: app-routing, label: /app/* }
+    - { id: traefik-api, from: traefik, to: pockito-api, sourcePort: api, kind: request, flow: app-routing, label: /api/* }
+    - { id: traefik-mcp, from: traefik, to: pockito-mcp, sourcePort: mcp, kind: request, flow: app-routing, label: /mcp/* }
     - { id: api-core, from: pockito-api, to: pockito-core, kind: request, flow: platform-api, label: API }
     - { id: mcp-keycloak, from: pockito-mcp, to: keycloak, kind: authenticate, flow: identity, label: JWKS / token issuer }
     - { id: traefik-keycloak, from: traefik, to: keycloak, kind: authenticate, flow: identity, label: OIDC login }
@@ -132,5 +141,13 @@ model:
 views:
   - id: deployment
     title: Pockito Kubernetes Deployment
+    description: Three entry points route through one measured gateway into workloads, identity, AI and stateful services.
+    theme: cloud-architecture
+    design:
+      composition: topology
+      audience: engineering
+      takeaway: Route ownership is explicit at the gateway; identity remains a quieter secondary path.
+      focus: [traefik, pockito-core]
+      story: [web-traefik, traefik-api, api-core, core-postgres]
     layout: { direction: right, spacing: relaxed }
     showLegend: true

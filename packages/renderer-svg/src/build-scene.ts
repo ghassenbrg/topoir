@@ -6,7 +6,7 @@ import type {
   TopoIRTheme,
 } from "@topoir/core";
 import { AssetRegistry, artworkLicenses } from "@topoir/assets";
-import { bundledFontTextMeasurer, layoutText } from "@topoir/core";
+import { assetReferences, bundledFontTextMeasurer, layoutText } from "@topoir/core";
 import { nodeComponent } from "./component.js";
 import type { Scene, SceneElement, SceneGroup, ScenePath } from "./scene.js";
 
@@ -226,9 +226,10 @@ export function buildScene(
     ...(view.description === undefined ? {} : { description: view.description }),
     background: theme.canvas.background,
     fontFamily: theme.font.family,
-    attribution: [...new Set(view.nodes.map((node) => {
-      const asset = assets.resolve(node.visual?.asset ?? node.icon ?? node.technology ?? node.kind) ?? assets.resolve(node.kind);
-      return asset ? artworkLicenses[asset.collection] ?? `${asset.id}: ${asset.license}; source: ${asset.source}` : "TopoIR generic artwork: MIT";
+    attribution: [...new Set(view.nodes.flatMap((node) => {
+      const resolved = assetReferences(node).map((reference) => assets.resolve(reference)).filter((asset) => asset !== undefined);
+      const displayed = resolved.length ? resolved : [assets.resolve(node.kind)].filter((asset) => asset !== undefined);
+      return displayed.length ? displayed.map((asset) => artworkLicenses[asset.collection] ?? `${asset.id}: ${asset.license}; source: ${asset.source}`) : ["TopoIR generic artwork: MIT"];
     }))].join("\n\n"),
     children: [
       { type: "rect", x: 0, y: 0, width, height, fill: theme.canvas.background },

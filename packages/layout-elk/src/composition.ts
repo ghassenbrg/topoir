@@ -8,11 +8,11 @@ export class CompositionEngine implements LayoutEngine {
 
   async layout(view: MeasuredView): Promise<LayoutResult> {
     const kind = view.design?.composition ?? "topology";
-    if (["sequence", "comparison", "swimlanes"].includes(kind) && view.edges.some((edge) => edge.sourcePort || edge.targetPort)) {
+    if (["sequence", "comparison", "swimlanes", "architecture-map"].includes(kind) && view.edges.some((edge) => edge.sourcePort || edge.targetPort)) {
       return { diagnostics: [{ code: "TOP402_COMPOSITION_PORT_UNSUPPORTED", severity: "error", message: `${kind} does not yet support explicit endpoint ports. Use topology/layers or omit the port constraints.` }] };
     }
     if (kind === "sequence") return { geometry: sequence(view), diagnostics: [], metrics: { candidatesEvaluated: 1 } };
-    if (kind === "comparison" || kind === "swimlanes") return { geometry: panels(view, kind), diagnostics: [], metrics: { candidatesEvaluated: 1 } };
+    if (kind === "comparison" || kind === "swimlanes" || kind === "architecture-map") return { geometry: panels(view, kind), diagnostics: [], metrics: { candidatesEvaluated: 1 } };
     const candidates: { result: LayoutResult; score: number }[] = [];
     const optimize = view.design?.optimize !== false && view.design !== undefined;
     for (const [seed, spacing] of (optimize ? [[1, view.layout.spacing], [7, "compact"], [19, "normal"]] : [[1, view.layout.spacing]]) as [number, MeasuredView["layout"]["spacing"]][]) {
@@ -38,7 +38,7 @@ export function compositionScore(view: MeasuredView, geometry: GeometryView): nu
     for (let i = 1; i < edge.points.length; i++) length += distance(edge.points[i - 1]!, edge.points[i]!);
   }
   const aspect = Math.abs(Math.log((geometry.bounds.width / Math.max(1, geometry.bounds.height)) / view.layout.aspectRatio));
-  return defects * 1e9 + (q.metrics.labelOverlaps + q.metrics.annotationOverlaps + q.metrics.groupTitleIntersections) * 1e6 + q.metrics.illegalBoundaryCrossings * 10000 + q.metrics.edgeCrossings * 1000 + aspect * 500 + bends * 8 + length * 0.015;
+  return defects * 1e9 + (q.metrics.labelOverlaps + q.metrics.annotationOverlaps + q.metrics.groupTitleIntersections) * 1e6 + q.metrics.endpointBodyCrossings * 20000 + q.metrics.illegalBoundaryCrossings * 10000 + q.metrics.edgeCrossings * 1000 + aspect * 500 + bends * 8 + length * 0.015;
 }
 
 function sequence(view: MeasuredView): GeometryView {
@@ -74,7 +74,7 @@ function sequence(view: MeasuredView): GeometryView {
 
 interface Block { id: string; width: number; height: number; node?: MeasuredNode; children?: { block: Block; x: number; y: number }[]; parent?: string }
 
-function panels(view: MeasuredView, kind: "comparison" | "swimlanes"): GeometryView {
+function panels(view: MeasuredView, kind: "comparison" | "swimlanes" | "architecture-map"): GeometryView {
   const build = (id?: string): Block => {
     const group = view.groups.find((item) => item.id === id);
     const blocks: Block[] = [
@@ -82,6 +82,47 @@ function panels(view: MeasuredView, kind: "comparison" | "swimlanes"): GeometryV
       ...view.nodes.filter((item) => item.group === id).map((node) => ({ id: node.id, width: node.width, height: node.height, node })),
     ];
     const root = id === undefined;
+    if (root && kind === "comparison") {
+      const panels = blocks.filter((block) => block.node === undefined);
+      const shared = blocks.filter((block) => block.node !== undefined);
+      const panelGap = 180, sharedGap = 56, pad = 24;
+      const panelWidth = panels.reduce((sum, block) => sum + block.width, 0) + Math.max(0, panels.length - 1) * panelGap;
+      const sharedWidth = shared.reduce((sum, block) => sum + block.width, 0) + Math.max(0, shared.length - 1) * sharedGap;
+      const width = Math.max(panelWidth, sharedWidth) + pad * 2;
+      const sharedHeight = Math.max(0, ...shared.map((block) => block.height));
+      const panelHeight = Math.max(0, ...panels.map((block) => block.height));
+      const sharedStart = pad + (width - pad * 2 - sharedWidth) / 2;
+      const panelStart = pad + (width - pad * 2 - panelWidth) / 2;
+      let cursor = sharedStart;
+      const sharedChildren = shared.map((block) => { const child = { block, x: cursor, y: pad }; cursor += block.width + sharedGap; return child; });
+      cursor = panelStart;
+      const panelY = pad + (shared.length ? sharedHeight + 72 : 0);
+      const panelChildren = panels.map((block) => { const child = { block, x: cursor, y: panelY }; cursor += block.width + panelGap; return child; });
+      return { id: "__root", width, height: panelY + panelHeight + pad, children: [...sharedChildren, ...panelChildren] };
+    }
+    if (root && kind === "architecture-map") {
+      const regions = blocks.filter((block) => block.node === undefined);
+      const shared = blocks.filter((block) => block.node !== undefined);
+      const pad = 24, gap = 64, columnGap = 120;
+      const lead = regions[0];
+      const right = regions.slice(1);
+      const rightWidth = Math.max(0, ...right.map((block) => block.width));
+      const rightHeight = right.reduce((sum, block) => sum + block.height, 0) + Math.max(0, right.length - 1) * gap;
+      const regionHeight = Math.max(lead?.height ?? 0, rightHeight);
+      const regionsWidth = (lead?.width ?? 0) + (lead && right.length ? columnGap : 0) + rightWidth;
+      const sharedWidth = shared.reduce((sum, block) => sum + block.width, 0) + Math.max(0, shared.length - 1) * gap;
+      const width = Math.max(regionsWidth, sharedWidth) + pad * 2;
+      const sharedHeight = Math.max(0, ...shared.map((block) => block.height));
+      let cursor = pad + (width - pad * 2 - sharedWidth) / 2;
+      const sharedChildren = shared.map((block) => { const child = { block, x: cursor, y: pad }; cursor += block.width + gap; return child; });
+      const regionY = pad + (shared.length ? sharedHeight + gap : 0);
+      const regionStart = pad + (width - pad * 2 - regionsWidth) / 2;
+      const children: { block: Block; x: number; y: number }[] = [...sharedChildren];
+      if (lead) children.push({ block: lead, x: regionStart, y: regionY + (regionHeight - lead.height) / 2 });
+      let y = regionY;
+      for (const block of right) { children.push({ block, x: regionStart + (lead?.width ?? 0) + (lead ? columnGap : 0), y }); y += block.height + gap; }
+      return { id: "__root", width, height: regionY + regionHeight + pad, children };
+    }
     const mode = root ? "row" : group?.layout.mode === "auto" ? "column" : group?.layout.mode ?? "column";
     const cols = mode === "row" ? Math.max(1, blocks.length) : mode === "grid" || mode === "pack" ? group?.layout.columns ?? 2 : 1;
     const gap = root ? (kind === "comparison" ? 180 : 96) : group?.layout.gap ?? 48;
@@ -111,7 +152,22 @@ function panels(view: MeasuredView, kind: "comparison" | "swimlanes"): GeometryV
     const forward = horizontal ? source.x < target.x : source.y < target.y;
     const a = horizontal ? { x: source.x + (forward ? source.width : 0), y: source.y + source.height / 2 } : { x: source.x + source.width / 2, y: source.y + (forward ? source.height : 0) };
     const b = horizontal ? { x: target.x + (forward ? 0 : target.width), y: target.y + target.height / 2 } : { x: target.x + target.width / 2, y: target.y + (forward ? 0 : target.height) };
-    const obstacles = nodes.map((node) => node === source || node === target ? node : inflate(node, 10));
+    const belongs = (nodeId: string, groupId: string): boolean => {
+      let current = view.nodes.find((node) => node.id === nodeId)?.group;
+      while (current) {
+        if (current === groupId) return true;
+        current = view.groups.find((group) => group.id === current)?.parent;
+      }
+      return false;
+    };
+    const obstacles: Rect[] = [
+      // Endpoints are obstacles at their exact silhouette: a route may leave or arrive
+      // perpendicular to an edge of the card, but must never run back across its body.
+      source, target,
+      ...nodes.filter((node) => node !== source && node !== target).map((node) => inflate(node, 10)),
+      ...groups.map((group) => ({ ...group, height: view.groups.find((item) => item.id === group.id)?.titleHeight ?? 38 })),
+      ...groups.filter((group) => !belongs(edge.from, group.id) && !belongs(edge.to, group.id)).map((group) => inflate(group, 6)),
+    ];
     const points = route(a, b, obstacles);
     return { id: edge.id, points, ...(edge.labelText ? { label: { x: (a.x + b.x) / 2 - (edge.labelText.width + 14) / 2, y: (a.y + b.y) / 2 - edge.labelText.height - 14, width: edge.labelText.width + 14, height: edge.labelText.height + 8, text: edge.label ?? edge.protocol ?? "" } } : {}) };
   });

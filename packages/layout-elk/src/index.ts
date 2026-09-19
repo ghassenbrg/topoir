@@ -90,6 +90,7 @@ export function toElkGraph(view: MeasuredView, seed = 1): ElkNode {
   ];
 
   const edges: ElkExtendedEdge[] = view.edges.map((edge) => {
+    const storyIndex = view.design?.story?.indexOf(edge.id) ?? -1;
     const label: ElkLabel[] =
       edge.labelText === undefined
         ? []
@@ -107,7 +108,8 @@ export function toElkGraph(view: MeasuredView, seed = 1): ElkNode {
       targets: [portReference(edge.to, edge.targetPort)],
       labels: label,
       layoutOptions: {
-        "elk.layered.priority.direction": String(10_000 - (edge.order ?? 0)),
+        "elk.layered.priority.direction": String(storyIndex >= 0 ? 100_000 - storyIndex : 10_000 - (edge.order ?? 0)),
+        "elk.layered.priority.shortness": String(storyIndex >= 0 ? 100_000 - storyIndex : 1),
       },
     };
   });
@@ -193,14 +195,23 @@ function groupToElk(
 }
 
 function nodeToElk(node: MeasuredNode): ElkNode {
-  const ports: ElkPort[] = node.ports.map((port) => ({
-    id: portReference(node.id, port.id),
-    width: 8,
-    height: 8,
-    layoutOptions: {
-      "elk.port.side": sideFor(port.side),
-    },
-  }));
+  // A port with a measured slot is pinned to that compartment's own edge, so the
+  // connector leaves the route it is drawn against instead of an arbitrary boundary point.
+  const pinned = node.ports.some((port) => port.slot !== undefined);
+  const ports: ElkPort[] = node.ports.map((port) => {
+    const slot = port.slot;
+    const side = sideFor(port.side);
+    if (slot === undefined) {
+      return { id: portReference(node.id, port.id), width: 8, height: 8, layoutOptions: { "elk.port.side": side } };
+    }
+    const centerY = slot.y + slot.height / 2 - 4;
+    const position =
+      side === "WEST" ? { x: -8, y: centerY }
+      : side === "NORTH" ? { x: slot.x + slot.width / 2 - 4, y: -8 }
+      : side === "SOUTH" ? { x: slot.x + slot.width / 2 - 4, y: node.height }
+      : { x: node.width, y: centerY };
+    return { id: portReference(node.id, port.id), width: 8, height: 8, ...position, layoutOptions: { "elk.port.side": side } };
+  });
   return {
     id: node.id,
     width: node.width,
@@ -208,7 +219,7 @@ function nodeToElk(node: MeasuredNode): ElkNode {
     ports,
     layoutOptions: {
       "elk.nodeSize.constraints": "FIXED_SIZE",
-      ...(ports.length === 0 ? {} : { "elk.portConstraints": "FIXED_SIDE" }),
+      ...(ports.length === 0 ? {} : { "elk.portConstraints": pinned ? "FIXED_POS" : "FIXED_SIDE" }),
     },
   };
 }

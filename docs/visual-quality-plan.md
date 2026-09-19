@@ -46,10 +46,12 @@ Design intent must not require coordinates. Multiple views may select different 
 - [x] SDK/CLI/MCP discovery and agent workflow; diverse showcases and custom-asset example.
 - [x] Asset/design/geometry regression tests and PNG attribution checksum/decompression checks.
 - [x] Public documentation and repeatable screenshot benchmark report with per-case gaps.
+- [x] Measured internal route compartments with real attachment slots: a component's declared ports are measured before layout, layout pins each connector to the compartment it is drawn against, and the renderer draws that same measured rectangle. Perturbed over 1/2/3/5 routes and long labels.
+- [x] Multiple ordered asset roles per component, drawn side by side in both horizontal and icon layouts, with every drawn role attributed.
 - [ ] Full-complexity reference fixtures and comparative visual approval for all six screenshots.
 - [ ] General repeated-region correspondence, composite gateways, narrative-spine placement, boundary portals, insets and rich illustrative sketch grammar.
 
-The checked items establish a usable foundation. They do not complete the last two items. Existing comparison rows align when their measured structures match; they are not a general symmetry solver. Replica badges do not instantiate workload copies. Story/focus currently emphasize the scene rather than constrain placement. The audience field guides agents rather than invoking a hidden design model.
+The checked items establish a usable foundation. They do not complete the last two items. Route compartments are a component-internal grammar only: they fix where a connector attaches, not where the layout engine places the components those connectors reach, so a route table can still be crossed by its own connectors when layer-internal placement disagrees with the declared order. Existing comparison rows align when their measured structures match; they are not a general symmetry solver. Replica badges do not instantiate workload copies. Story/focus currently emphasize the scene rather than constrain placement. The audience field guides agents rather than invoking a hidden design model.
 
 ## Critical alternative comparison
 

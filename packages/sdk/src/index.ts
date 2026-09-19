@@ -158,8 +158,12 @@ export class TopoIRCompiler {
       }
       const measured = measureView(view, theme, options.textMeasurer, (reference) => assets.resolve(reference));
       for (const node of measured.nodes) {
-        const reference = node.visual?.asset ?? node.icon ?? node.technology;
-        if (reference && !assets.resolve(reference)) diagnostics.push({ code: "TOP322_ASSET_NOT_FOUND", severity: node.visual?.asset ? "error" : "warning", message: `Asset ${JSON.stringify(reference)} on ${node.id} was not found; ${node.visual?.asset ? "add it to the configured inventory" : "using the semantic kind fallback"}.` });
+        const explicit = node.visual?.assets ?? [];
+        if (explicit.length > 0 && node.visual?.asset !== undefined) diagnostics.push({ code: "TOP323_ASSET_OVERRIDDEN", severity: "warning", message: `Node ${node.id} sets both visual.asset and visual.assets; visual.assets is the complete list, so ${JSON.stringify(node.visual.asset)} is not rendered. Add it to visual.assets or remove it.` });
+        const required = explicit.length > 0 ? explicit : [node.visual?.asset].filter((reference): reference is string => reference !== undefined);
+        const optional = explicit.length > 0 ? [] : [node.icon, node.technology].filter((reference): reference is string => reference !== undefined && !required.includes(reference));
+        for (const reference of required) if (!assets.resolve(reference)) diagnostics.push({ code: "TOP322_ASSET_NOT_FOUND", severity: "error", message: `Asset ${JSON.stringify(reference)} on ${node.id} was not found; add it to the configured inventory.` });
+        for (const reference of optional) if (!assets.resolve(reference)) diagnostics.push({ code: "TOP322_ASSET_NOT_FOUND", severity: "warning", message: `Asset ${JSON.stringify(reference)} on ${node.id} was not found; using the semantic kind fallback.` });
       }
       const layout = await layoutEngine.layout(measured);
       diagnostics.push(...layout.diagnostics);

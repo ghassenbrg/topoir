@@ -116,3 +116,33 @@ describe("semantic compiler", () => {
     expect(result.diagnostics.every((item) => item.source === "invalid.yaml")).toBe(true);
   });
 });
+
+describe("deterministic sibling ordering", () => {
+  const mixed = `
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: ordering
+model:
+  nodes:
+    - { id: zebra, kind: service }
+    - { id: third, kind: service, order: 2 }
+    - { id: alpha, kind: service }
+    - { id: first, kind: service, order: 0 }
+    - { id: second, kind: service, order: 1 }
+  edges:
+    - { id: b-unranked, from: first, to: second }
+    - { id: a-ranked, from: second, to: third, order: 5 }
+`;
+
+  it("ranks explicitly ordered siblings ahead of unranked ones instead of treating a missing order as zero", () => {
+    const result = loadDocument(mixed, { source: "ordering.yaml" });
+    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+    const view = projectView(result.document!);
+
+    // Ranked nodes keep their declared sequence; unranked nodes follow, by ID.
+    expect(view.nodes.map((node) => node.id)).toEqual(["first", "second", "third", "alpha", "zebra"]);
+    // An unranked sibling never sorts above a ranked one just because it sorts earlier by ID.
+    expect(view.edges.map((edge) => edge.id)).toEqual(["a-ranked", "b-unranked"]);
+  });
+});

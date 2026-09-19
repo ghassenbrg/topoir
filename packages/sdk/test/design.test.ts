@@ -65,4 +65,15 @@ describe("visual design compiler", () => {
     expect(result.ok).toBe(false);
     expect(result.diagnostics.map((d) => d.code)).toContain("TOP402_COMPOSITION_PORT_UNSUPPORTED");
   });
+
+  it("measures composite port compartments and multiple assets before layout", async () => {
+    const source = { apiVersion: "topoir.dev/v1alpha1", kind: "Architecture", metadata: { name: "composite" }, model: { nodes: [{ id: "gateway", kind: "gateway", ports: [{ id: "app", label: "/app/*", side: "east" }, { id: "api", label: "/api/*", side: "east" }], visual: { assets: ["lucide:waypoints", "k8s:ingress"], portLabels: "inside" } }] } };
+    const result = await new TopoIRCompiler().compile(JSON.stringify(source));
+    const node = result.views[0]?.measured.nodes[0];
+    expect(result.ok).toBe(true);
+    expect(node?.ports.every((port) => port.labelText !== undefined)).toBe(true);
+    expect(node?.assetSizes?.length).toBeGreaterThanOrEqual(2);
+    expect(node?.height).toBeGreaterThan(100);
+    expect(String(result.artifacts[0]?.content)).toContain("/app/*");
+  });
 });

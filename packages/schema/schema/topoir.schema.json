@@ -178,7 +178,8 @@
         "label": { "$ref": "#/$defs/nonEmptyString" },
         "side": { "enum": ["north", "east", "south", "west", "auto"] },
         "kind": { "enum": ["input", "output", "bidirectional"] },
-        "protocol": { "$ref": "#/$defs/nonEmptyString" }
+        "protocol": { "$ref": "#/$defs/nonEmptyString" },
+        "order": { "type": "integer" }
       },
       "patternProperties": { "^x-": {} },
       "additionalProperties": false
@@ -304,14 +305,21 @@
         "status": { "enum": ["normal", "success", "failure", "warning"] },
         "badge": { "type": "string", "minLength": 1, "maxLength": 48 },
         "replicas": { "type": "integer", "minimum": 1, "maximum": 9999 },
-        "asset": { "type": "string", "minLength": 1, "maxLength": 256 }
+        "asset": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "assets": {
+          "type": "array",
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+        },
+        "portLabels": { "enum": ["hidden", "inside"] }
       }
     },
     "design": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "composition": { "enum": ["topology", "layers", "sequence", "swimlanes", "comparison"] },
+        "composition": { "enum": ["topology", "layers", "sequence", "swimlanes", "comparison", "architecture-map"] },
         "audience": { "enum": ["engineering", "executive", "presentation"] },
         "takeaway": { "type": "string", "minLength": 1, "maxLength": 1000 },
         "focus": { "type": "array", "items": { "$ref": "#/$defs/id" }, "uniqueItems": true },

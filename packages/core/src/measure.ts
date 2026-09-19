@@ -8,7 +8,7 @@ import type {
   Size,
   ViewGraph,
 } from "./ir.js";
-import { nodeShape, type TopoIRTheme } from "./theme.js";
+import { assetReferences, nodeShape, type TopoIRTheme } from "./theme.js";
 import { bundledFontTextMeasurer } from "./font-measurer.js";
 
 export interface TextStyle {
@@ -67,20 +67,44 @@ export function measureView(
     const textHeight = labelText.height + (descriptionText === undefined ? 0 : 6 + descriptionText.height);
     const iconSpace = theme.node.iconSize + 12;
     const shape = nodeShape(node, theme);
-    const intrinsic = shape === "image" ? assetSize?.(node.visual?.asset ?? node.icon ?? node.technology ?? node.kind) : undefined;
+    const references = assetReferences(node);
+    const assetSizes = references.map((reference) => assetSize?.(reference)).filter((value): value is Size => value !== undefined);
+    const intrinsic = shape === "image" ? assetSizes[0] : undefined;
     const imageScale = intrinsic ? Math.min(240 / intrinsic.width, 140 / intrinsic.height) : 1;
     const imageSize = intrinsic ? { width: round(intrinsic.width * imageScale), height: round(intrinsic.height * imageScale) } : undefined;
     const vertical = shape === "icon" || shape === "image";
     const badgeHeight = node.visual?.badge !== undefined || node.visual?.replicas !== undefined ? 24 : 0;
+    const showPorts = node.visual?.portLabels === "inside" && node.ports.length > 0;
+    const portRows = showPorts ? node.ports.map((port) => layoutText(port.label, 210, { fontSize: theme.font.descriptionSize, fontWeight: 600, lineHeight: 1.2 }, textMeasurer, 1)) : [];
+    const portPanelHeight = portRows.length ? 12 + portRows.reduce((sum, row) => sum + Math.max(28, row.height + 12), 0) : 0;
+    const portPanelWidth = Math.max(0, ...portRows.map((row) => row.width + 36));
+    const assetStripWidth = assetSizes.length > 1 ? Math.min(5, assetSizes.length) * (theme.node.iconSize + 8) : 0;
     const shapePadding = shape === "cylinder" || shape === "diamond" ? 28 : shape === "stack" ? 8 : 0;
+    const width = round(Math.max(theme.node.minWidth, (imageSize?.width ?? 0) + 32, portPanelWidth + theme.spacing.nodePaddingX * 2, assetStripWidth + theme.spacing.nodePaddingX * 2, textWidth + (vertical ? 0 : Math.max(iconSpace, assetStripWidth)) + theme.spacing.nodePaddingX * 2 + shapePadding));
+    const height = round(Math.max(theme.node.minHeight, textHeight + theme.spacing.nodePaddingY * 2 + (vertical ? (imageSize?.height ?? theme.node.iconSize) + 12 : 0) + shapePadding + badgeHeight + portPanelHeight));
+    // One measured compartment stack: layout pins each port to its slot and the renderer
+    // draws the same rectangle, so a visible route table always matches where routes attach.
+    let slotY = height - badgeHeight - portPanelHeight + 8;
+    const slots = portRows.map((row) => {
+      const slotHeight = Math.max(28, row.height + 12);
+      const slot = { x: 14, y: round(slotY), width: round(width - 28), height: round(slotHeight) };
+      slotY += slotHeight;
+      return slot;
+    });
     return {
       ...node,
-      width: round(Math.max(theme.node.minWidth, (imageSize?.width ?? 0) + 32, textWidth + (vertical ? 0 : iconSpace) + theme.spacing.nodePaddingX * 2 + shapePadding)),
-      height: round(Math.max(theme.node.minHeight, textHeight + theme.spacing.nodePaddingY * 2 + (vertical ? (imageSize?.height ?? theme.node.iconSize) + 12 : 0) + shapePadding + badgeHeight)),
+      width,
+      height,
       labelText,
       ...(imageSize ? { imageSize } : {}),
+      ...(assetSizes.length ? { assetSizes } : {}),
       ...(descriptionText === undefined ? {} : { descriptionText }),
-      ports: node.ports.map((port) => ({ ...port, owner: node.id })),
+      ports: node.ports.map((port, index) => ({
+        ...port,
+        owner: node.id,
+        ...(portRows[index] ? { labelText: portRows[index] } : {}),
+        ...(slots[index] ? { slot: slots[index] } : {}),
+      })),
     };
   });
 

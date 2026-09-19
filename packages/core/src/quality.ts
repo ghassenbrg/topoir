@@ -13,6 +13,7 @@ export interface QualityReport {
   readonly metrics: {
     readonly nodeOverlaps: number;
     readonly edgeNodeIntersections: number;
+    readonly endpointBodyCrossings: number;
     readonly edgeCrossings: number;
     readonly nonOrthogonalSegments: number;
     readonly emptyRoutes: number;
@@ -30,6 +31,7 @@ export function analyzeGeometry(view: MeasuredView, geometry: GeometryView): Qua
   const semanticNodeById = new Map(view.nodes.map((node) => [node.id, node]));
   let nodeOverlaps = 0;
   let edgeNodeIntersections = 0;
+  let endpointBodyCrossings = 0;
   let nonOrthogonalSegments = 0;
   let emptyRoutes = 0;
   let illegalBoundaryCrossings = 0;
@@ -72,7 +74,15 @@ export function analyzeGeometry(view: MeasuredView, geometry: GeometryView): Qua
         diagnostics.push(error("TOP421_EDGE_NOT_ORTHOGONAL", `Edge ${JSON.stringify(edgeGeometry.id)} contains a diagonal segment.`));
       }
       for (const node of geometry.nodes) {
-        if (node.id === edge?.from || node.id === edge?.to) continue;
+        if (node.id === edge?.from || node.id === edge?.to) {
+          // An endpoint may be touched perpendicularly but never crossed: a route that
+          // re-enters its own source or target card reads as an arrow leaving the wrong side.
+          if (segmentIntersectsInterior(start, end, node)) {
+            endpointBodyCrossings += 1;
+            diagnostics.push(warning("TOP424_EDGE_CROSSES_OWN_ENDPOINT", `Edge ${JSON.stringify(edgeGeometry.id)} runs back across its own endpoint ${JSON.stringify(node.id)}.`));
+          }
+          continue;
+        }
         if (segmentIntersectsInterior(start, end, node)) {
           edgeNodeIntersections += 1;
           diagnostics.push(error("TOP422_EDGE_INTERSECTS_NODE", `Edge ${JSON.stringify(edgeGeometry.id)} passes through node ${JSON.stringify(node.id)}.`));
@@ -134,6 +144,7 @@ export function analyzeGeometry(view: MeasuredView, geometry: GeometryView): Qua
     metrics: {
       nodeOverlaps,
       edgeNodeIntersections,
+      endpointBodyCrossings,
       edgeCrossings,
       nonOrthogonalSegments,
       emptyRoutes,
@@ -278,6 +289,10 @@ function isOrthogonal(start: Point, end: Point): boolean {
 
 function error(code: string, message: string): Diagnostic {
   return { code, severity: "error", message };
+}
+
+function warning(code: string, message: string): Diagnostic {
+  return { code, severity: "warning", message };
 }
 
 function round(value: number): number {

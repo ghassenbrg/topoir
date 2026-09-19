@@ -52,6 +52,7 @@ const aliases: Record<string, string> = {
   ingress: "k8s:ingress", configmap: "k8s:configmap", secret: "k8s:secret", secrets: "k8s:secret",
   namespace: "k8s:namespace", "kubernetes node": "k8s:worker-node", "kubernetes-service": "k8s:service",
   keycloak: "lucide:fingerprint-pattern", traefik: "lucide:waypoints", opensearch: "lucide:search", seaweedfs: "lucide:hard-drive",
+  cloudfront: "lucide:globe", route53: "lucide:signpost", loki: "lucide:logs", tempo: "lucide:scan-line",
   client: "lucide:monitor", user: "lucide:user-round", users: "lucide:users-round", mobile: "lucide:smartphone",
   browser: "lucide:panels-top-left", service: "lucide:app-window", api: "lucide:braces", worker: "lucide:cog",
   database: "lucide:database", cache: "lucide:layers", queue: "lucide:list-ordered", stream: "lucide:radio-tower",

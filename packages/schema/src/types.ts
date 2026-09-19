@@ -150,6 +150,7 @@ export interface PortDefinition {
   readonly side?: PortSide;
   readonly kind?: "input" | "output" | "bidirectional";
   readonly protocol?: string;
+  readonly order?: number;
   readonly [extension: `x-${string}`]: unknown;
 }
 
@@ -254,10 +255,12 @@ export interface NodeVisual {
   readonly badge?: string;
   readonly replicas?: number;
   readonly asset?: string;
+  readonly assets?: readonly string[];
+  readonly portLabels?: "hidden" | "inside";
 }
 
 export interface DesignIntent {
-  readonly composition?: "topology" | "layers" | "sequence" | "swimlanes" | "comparison";
+  readonly composition?: "topology" | "layers" | "sequence" | "swimlanes" | "comparison" | "architecture-map";
   readonly audience?: "engineering" | "executive" | "presentation";
   readonly takeaway?: string;
   readonly focus?: readonly string[];
