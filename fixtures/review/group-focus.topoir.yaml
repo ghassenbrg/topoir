@@ -1,0 +1,41 @@
+# Review probe: accepted intent must be executable or explicitly advisory.
+# Baseline defect (dfad55c): focusing a real group produces the same SVG as no
+# focus at all, with no diagnostic saying the intent was not applied.
+# Owning tasks: T04 (honest classification now), T12 (implementation).
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: review-group-focus
+  title: Group focus
+model:
+  groups:
+    - id: platform
+      kind: kubernetes-cluster
+      label: Platform
+  nodes:
+    - id: edge
+      kind: client
+      label: Edge Client
+    - id: api
+      kind: api
+      label: API
+      group: platform
+    - id: db
+      kind: database
+      label: Database
+      group: platform
+  edges:
+    - id: edge-api
+      from: edge
+      to: api
+      kind: request
+    - id: api-db
+      from: api
+      to: db
+      kind: write
+views:
+  - id: focused
+    design:
+      composition: architecture
+      focus:
+        - platform

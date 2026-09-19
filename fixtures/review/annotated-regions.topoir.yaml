@@ -1,0 +1,38 @@
+# Review probe: scene coverage for declared groups and annotations.
+# Used with a hostile layout backend that drops a declared group or annotation
+# from the geometry. Losing a declared object must be a coverage failure.
+# Baseline defect (dfad55c): analyzeGeometry has no dropped-group/annotation contract.
+# Owning task: T03.
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: review-annotated-regions
+  title: Annotated regions
+model:
+  groups:
+    - id: platform
+      kind: kubernetes-cluster
+      label: Platform
+  nodes:
+    - id: api
+      kind: api
+      label: API
+      group: platform
+    - id: db
+      kind: database
+      label: Database
+      group: platform
+  edges:
+    - id: api-db
+      from: api
+      to: db
+      kind: write
+  annotations:
+    - id: retention
+      kind: note
+      text: Retained for 30 days
+      anchor: db
+views:
+  - id: overview
+    design:
+      composition: architecture

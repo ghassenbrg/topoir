@@ -1,0 +1,18 @@
+# Review probe: required label content must never be silently abbreviated.
+# Baseline defect (dfad55c): label collapses to two lines ending in an ellipsis
+# while droppedLabels stays 0 and no diagnostic is emitted.
+# Owning task: T01.
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: review-long-label
+  title: Long label
+model:
+  nodes:
+    - id: a
+      kind: service
+      label: Primary service for account reconciliation across international regions with guaranteed delivery and strict audit requirements
+views:
+  - id: overview
+    design:
+      composition: architecture

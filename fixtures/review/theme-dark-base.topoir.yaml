@@ -1,0 +1,21 @@
+# Review probe A: named theme baseline for inheritance equivalence.
+# Pairs with theme-dark-extends.topoir.yaml. The two documents differ only in
+# how the identical theme is referenced, so their visible treatment must match.
+# Baseline defect (dfad55c): this document draws one asset backplate.
+# Owning task: T02.
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: review-theme-dark-base
+  title: Dark base theme
+model:
+  nodes:
+    - id: a
+      kind: service
+      label: Service
+      technology: postgresql
+views:
+  - id: overview
+    design:
+      composition: architecture
+    theme: dark-engineering

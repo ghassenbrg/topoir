@@ -1,0 +1,32 @@
+# Review probe: output file naming must not let two views overwrite each other.
+# The two view ids differ only by case, so a case-insensitive filesystem (macOS
+# default, Windows) maps both to the same output file.
+# Baseline defect (dfad55c): no preflight collision check before writing.
+# Owning task: T03.
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: review-colliding-view-ids
+  title: Colliding view ids
+model:
+  nodes:
+    - id: api
+      kind: api
+      label: API
+    - id: db
+      kind: database
+      label: Database
+  edges:
+    - id: api-db
+      from: api
+      to: db
+      kind: write
+views:
+  - id: Overview
+    title: Overview (capital)
+    design:
+      composition: architecture
+  - id: overview
+    title: Overview (lowercase)
+    design:
+      composition: architecture

@@ -1,0 +1,20 @@
+# Review probe: a schema-valid 48-character badge must fit or be diagnosed.
+# Baseline defect (dfad55c): badge measures 529.45px inside a 148px node and
+# overruns the 360px canvas with ok=true and no diagnostics.
+# Owning task: T01.
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: review-wide-badge
+  title: Wide badge
+model:
+  nodes:
+    - id: a
+      kind: service
+      label: Service
+      visual:
+        badge: WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW
+views:
+  - id: overview
+    design:
+      composition: architecture

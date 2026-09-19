@@ -1,0 +1,36 @@
+# Review probe: relationship selection is closure-based.
+# Two relationships share the same endpoints. Selecting one currently also
+# induces the other, which is surprising for a narrow explanation.
+# Baseline behavior (dfad55c): both edges appear in the projected view.
+# Owning tasks: T04 (document the limitation), T11 (exact selection mode).
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: review-shared-endpoints
+  title: Shared endpoints
+model:
+  nodes:
+    - id: api
+      kind: api
+      label: API
+    - id: db
+      kind: database
+      label: Database
+  edges:
+    - id: api-writes
+      from: api
+      to: db
+      label: write
+      kind: write
+    - id: api-reads
+      from: api
+      to: db
+      label: read
+      kind: read
+views:
+  - id: writes-only
+    design:
+      composition: architecture
+    include:
+      edges:
+        - api-writes

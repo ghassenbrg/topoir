@@ -1,0 +1,26 @@
+# Review probe: content preservation for multiple asset roles.
+# Schema permits six `visual.assets`; every requested role must be accounted for.
+# Baseline defect (dfad55c): only five images are drawn, ok=true, no diagnostics.
+# Owning task: T01.
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: review-six-assets
+  title: Six asset roles
+model:
+  nodes:
+    - id: a
+      kind: service
+      label: Service
+      visual:
+        assets:
+          - devicon:postgresql
+          - devicon:redis
+          - devicon:python
+          - devicon:go
+          - devicon:docker
+          - devicon:kubernetes
+views:
+  - id: overview
+    design:
+      composition: architecture

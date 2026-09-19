@@ -1,0 +1,25 @@
+# Review probe: unreadable paint must be diagnosed.
+# Baseline defect (dfad55c): white text on a white fill compiles with ok=true
+# and no contrast/visibility diagnostic.
+# Owning task: T02.
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: review-invisible-text
+  title: Invisible text
+model:
+  nodes:
+    - id: a
+      kind: service
+      label: Service
+views:
+  - id: overview
+    design:
+      composition: architecture
+    theme:
+      node:
+        byKind:
+          service:
+            fill: '#FFFFFF'
+            text: '#FFFFFF'
+            stroke: '#FFFFFF'

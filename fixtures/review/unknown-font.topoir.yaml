@@ -1,0 +1,21 @@
+# Review probe: font selection must be a resolved asset contract.
+# Baseline defect (dfad55c): an unknown family is accepted, the scene claims it,
+# the SVG embeds DejaVu Sans, and measurement silently uses the bundled font.
+# Owning task: T02.
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: review-unknown-font
+  title: Unknown font
+model:
+  nodes:
+    - id: a
+      kind: service
+      label: Service
+views:
+  - id: overview
+    design:
+      composition: architecture
+    theme:
+      font:
+        family: Invented Font Family

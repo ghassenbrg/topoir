@@ -1,0 +1,22 @@
+# Review probe B: empty inheritance of the same named theme.
+# Pairs with theme-dark-base.topoir.yaml.
+# Baseline defect (dfad55c): this document draws zero asset backplates because
+# renderer theme-name branches no longer match the derived `+authored` id.
+# Owning task: T02.
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: review-theme-dark-extends
+  title: Dark extended theme
+model:
+  nodes:
+    - id: a
+      kind: service
+      label: Service
+      technology: postgresql
+views:
+  - id: overview
+    design:
+      composition: architecture
+    theme:
+      extends: dark-engineering
