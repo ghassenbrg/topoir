@@ -11,7 +11,7 @@ describe("visual design compiler", () => {
       const result = await new TopoIRCompiler().compile(await readFile(join(folder, name), "utf8"));
       expect(result.diagnostics.filter((d) => d.severity === "error"), name).toEqual([]);
       expect(result.ok, name).toBe(true);
-      expect(result.views[0]?.metrics).toMatchObject({ nodeOverlaps: 0, edgeNodeIntersections: 0, nonOrthogonalSegments: 0, emptyRoutes: 0 });
+      expect(result.views[0]?.metrics, name).toMatchObject({ nodeOverlaps: 0, edgeNodeIntersections: 0, endpointBodyCrossings: 0, nonOrthogonalSegments: 0, emptyRoutes: 0, labelOverlaps: 0, coincidentEdgeSegments: 0 });
     }
   });
 
@@ -75,5 +75,63 @@ describe("visual design compiler", () => {
     expect(node?.assetSizes?.length).toBeGreaterThanOrEqual(2);
     expect(node?.height).toBeGreaterThan(100);
     expect(String(result.artifacts[0]?.content)).toContain("/app/*");
+  });
+});
+
+describe("agent-authored design", () => {
+  const document = (theme: unknown) => ({
+    apiVersion: "topoir.dev/v1alpha1",
+    kind: "Architecture",
+    metadata: { name: "authored" },
+    model: {
+      groups: [
+        { id: "a", kind: "region", label: "Alpha", visual: { fill: "#FFF7ED", stroke: "#EA580C" } },
+        { id: "b", kind: "region", label: "Beta", visual: { fill: "#EFF6FF", stroke: "#2563EB" } },
+      ],
+      nodes: [
+        { id: "n1", kind: "service", label: "One", group: "a" },
+        { id: "n2", kind: "service", label: "Two", group: "b" },
+      ],
+      edges: [{ id: "e", from: "n1", to: "n2", label: "sync" }],
+    },
+    views: [{ id: "overview", theme }],
+  });
+
+  it("gives sibling boundaries of the same kind their own colours", async () => {
+    const result = await new TopoIRCompiler().compile(JSON.stringify(document("technical-clean")));
+    expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+    const svg = String(result.artifacts[0]?.content);
+    // The theme paints both regions identically; only the per-boundary override separates them.
+    expect(svg).toContain("#FFF7ED");
+    expect(svg).toContain("#EA580C");
+    expect(svg).toContain("#EFF6FF");
+  });
+
+  it("layers authored design tokens over a named base", async () => {
+    const result = await new TopoIRCompiler().compile(
+      JSON.stringify(
+        document({
+          extends: "technical-clean",
+          canvas: { background: "#0F1420", foreground: "#EAF0FA" },
+          font: { labelSize: 17 },
+          node: { radius: 2 },
+          edge: { palette: ["#3D8BFD", "#E06C9F"] },
+        }),
+      ),
+    );
+    expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+    const svg = String(result.artifacts[0]?.content);
+    expect(svg, "authored canvas").toContain("#0F1420");
+    expect(svg, "authored label size").toContain('font-size="17"');
+    // Everything not overridden still comes from the base.
+    expect(result.views[0]?.metrics).toMatchObject({ nodeOverlaps: 0, emptyRoutes: 0 });
+  });
+
+  it("rejects a design token outside its documented range", async () => {
+    const result = await new TopoIRCompiler().compile(
+      JSON.stringify(document({ extends: "technical-clean", font: { labelSize: 400 } })),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics.map((d) => d.code)).toContain("TOP110_SCHEMA_INVALID");
   });
 });

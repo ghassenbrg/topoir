@@ -45,7 +45,18 @@ export function buildScene(
     .flatMap((groupGeometry) => {
       const group = groupById.get(groupGeometry.id);
       if (group === undefined) return [];
-      const paint = theme.group.byKind[group.kind] ?? theme.group.default;
+      // A per-boundary override wins over the theme's paint for that kind, so sibling
+      // regions of the same kind can be told apart — colour-coded zones are how the
+      // reference diagrams separate one environment from another.
+      const base = theme.group.byKind[group.kind] ?? theme.group.default;
+      const override = group.visual;
+      const paint = override
+        ? {
+            fill: override.fill ?? base.fill,
+            stroke: override.stroke ?? base.stroke,
+            text: override.text ?? base.text,
+          }
+        : base;
       const dash = group.kind === "external-zone" || group.kind === "security-boundary" || theme.language?.boundaries === "outline" ? "7 5" : undefined;
       return [
         {

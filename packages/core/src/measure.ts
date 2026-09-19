@@ -57,6 +57,16 @@ export function measureView(
     lineHeight: theme.font.lineHeight,
   };
 
+  // A component carrying many relationships needs room for them to attach separately.
+  // Without this, a hub's connectors are spread across a card only tall enough for its
+  // label, land a pixel or two apart, and are drawn as one thick line.
+  const connectorSpacing = 12;
+  const incident = new Map<string, number>();
+  for (const edge of view.edges) {
+    incident.set(edge.from, (incident.get(edge.from) ?? 0) + 1);
+    incident.set(edge.to, (incident.get(edge.to) ?? 0) + 1);
+  }
+
   const nodes: MeasuredNode[] = view.nodes.map((node) => {
     const labelText = layoutText(node.label, theme.node.maxTextWidth, labelStyle, textMeasurer);
     const descriptionText =
@@ -81,7 +91,9 @@ export function measureView(
     const assetStripWidth = assetSizes.length > 1 ? Math.min(5, assetSizes.length) * (theme.node.iconSize + 8) : 0;
     const shapePadding = shape === "cylinder" || shape === "diamond" ? 28 : shape === "stack" ? 8 : 0;
     const width = round(Math.max(theme.node.minWidth, (imageSize?.width ?? 0) + 32, portPanelWidth + theme.spacing.nodePaddingX * 2, assetStripWidth + theme.spacing.nodePaddingX * 2, textWidth + (vertical ? 0 : Math.max(iconSpace, assetStripWidth)) + theme.spacing.nodePaddingX * 2 + shapePadding));
-    const height = round(Math.max(theme.node.minHeight, textHeight + theme.spacing.nodePaddingY * 2 + (vertical ? (imageSize?.height ?? theme.node.iconSize) + 12 : 0) + shapePadding + badgeHeight + portPanelHeight));
+    // Half the relationships can be expected on each of the two facing sides.
+    const connectorHeight = Math.min(360, Math.ceil((incident.get(node.id) ?? 0) / 2) * connectorSpacing);
+    const height = round(Math.max(theme.node.minHeight, connectorHeight, textHeight + theme.spacing.nodePaddingY * 2 + (vertical ? (imageSize?.height ?? theme.node.iconSize) + 12 : 0) + shapePadding + badgeHeight + portPanelHeight));
     // One measured compartment stack: layout pins each port to its slot and the renderer
     // draws the same rectangle, so a visible route table always matches where routes attach.
     let slotY = height - badgeHeight - portPanelHeight + 8;

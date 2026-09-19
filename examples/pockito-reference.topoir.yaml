@@ -13,32 +13,31 @@ model:
     - id: cluster
       kind: kubernetes-cluster
       label: VM — K8S — default cluster
-    - id: pockito-workloads
-      kind: namespace
-      label: Pockito workloads
-      parent: cluster
-      layout: { mode: column }
-    - id: platform-services
-      kind: namespace
-      label: Platform services
+    - id: pockito-apis
+      kind: logical
+      label: Pockito APIs
       parent: cluster
       layout: { mode: column }
     - id: state
       kind: logical
       label: Cache + Streams
       parent: cluster
+      order: 2
       layout: { mode: column }
   nodes:
     - id: mobile-app
       kind: client
+      order: 0
       label: Mobile App
       group: clients
     - id: web-app
       kind: client
+      order: 1
       label: Web App
       group: clients
     - id: ai-agent
       kind: client
+      order: 2
       label: AI Agent
       group: clients
     - id: traefik
@@ -55,50 +54,55 @@ model:
       kind: pod
       order: 0
       label: Pockito-webapp
-      group: pockito-workloads
+      group: cluster
       visual: { replicas: 2, assets: ['k8s:pod', 'lucide:panels-top-left'] }
     - id: pockito-api
       kind: pod
       order: 1
       label: Pockito-api
-      group: pockito-workloads
+      group: pockito-apis
       visual: { replicas: 3, assets: ['k8s:pod', 'lucide:braces'] }
     - id: pockito-mcp
       kind: pod
       order: 2
       label: Pockito-mcp
-      group: pockito-workloads
+      group: pockito-apis
       visual: { replicas: 2, assets: ['k8s:pod', 'lucide:bot'] }
     - id: pockito-core
       kind: pod
       label: Pockito-core
       description: Pockito
-      group: platform-services
+      group: cluster
       visual: { replicas: 3, assets: ['k8s:pod', 'lucide:component'], emphasis: primary }
     - id: dify
       kind: pod
+      order: 0
       label: Dify
-      group: platform-services
+      group: cluster
       visual: { replicas: 2, assets: ['k8s:pod', 'lucide:workflow'] }
     - id: keycloak
       kind: identity-provider
+      order: 3
       label: Keycloak
-      group: platform-services
+      group: cluster
       technology: keycloak
       visual: { assets: ['k8s:pod', 'lucide:fingerprint-pattern'] }
     - id: seaweedfs
       kind: filesystem
+      order: 1
       label: SeaweedFS
-      group: platform-services
+      group: cluster
       technology: seaweedfs
       visual: { assets: ['k8s:pod', 'lucide:hard-drive'] }
     - id: redis
       kind: cache
+      order: 0
       label: Redis
       group: state
       technology: redis
     - id: postgresql
       kind: database
+      order: 1
       label: PostgreSQL
       group: state
       technology: postgresql
@@ -144,10 +148,10 @@ views:
     description: Three entry points route through one measured gateway into workloads, identity, AI and stateful services.
     theme: cloud-architecture
     design:
-      composition: topology
+      composition: architecture
       audience: engineering
       takeaway: Route ownership is explicit at the gateway; identity remains a quieter secondary path.
       focus: [traefik, pockito-core]
       story: [web-traefik, traefik-api, api-core, core-postgres]
-    layout: { direction: right, spacing: relaxed }
+    layout: { direction: right, spacing: relaxed, aspectRatio: 2.3 }
     showLegend: true

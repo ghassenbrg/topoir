@@ -61,7 +61,7 @@ views:
       optimize: true
 ```
 
-`composition`: `topology`, `layers` (downward by default), `sequence`, `swimlanes`, `comparison`, or `architecture-map`. `audience`: `engineering`, `executive`, or `presentation` (advisory). `focus` references nodes; `story` is an ordered list of edge IDs. References must exist. Keep referenced items in the selected view. Story controls emphasis/numbering, not a hard placement constraint yet. Sequence chronology comes from edge `step`, then `order`, then stable ID.
+`composition`: `topology`, `layers` (downward by default), `architecture`, `sequence`, `swimlanes`, `comparison`, or `architecture-map`. `audience`: `engineering`, `executive`, or `presentation` (advisory). `focus` references nodes; `story` is an ordered list of edge IDs. References must exist. Keep referenced items in the selected view. Story controls emphasis/numbering, not a hard placement constraint yet. Sequence chronology comes from edge `step`, then `order`, then stable ID.
 
 Node `visual` supports `shape` (`auto`, `card`, `icon`, `cylinder`, `stack`, `pill`, `diamond`, `image`), `emphasis` (`primary`, `secondary`, `muted`), `status` (`normal`, `success`, `failure`, `warning`), a text `badge` (48 characters), integer `replicas`, and inventory artwork. Replicas are a visual summary, not expanded independently addressable nodes. Edges support the same emphasis/status vocabulary and integer `step`.
 
@@ -69,9 +69,17 @@ Node `visual` supports `shape` (`auto`, `card`, `icon`, `cylinder`, `stack`, `pi
 
 `visual.asset` names one inventory entry. `visual.assets` names an ordered list of up to six asset roles — for example a platform marker plus the component's own logo — and when it is present it is the complete list for that component, so a separate `visual.asset` is reported as overridden (`TOP323_ASSET_OVERRIDDEN`) rather than silently dropped. When neither is given, one asset is resolved from `icon`, then `technology`, then the semantic kind. Up to five roles are drawn side by side and every drawn role is attributed in the export metadata.
 
+### The `architecture` composition
+
+`architecture` is the compiler's own banded composition, and the one to reach for when a view should read as an architecture wall diagram. Each container — the canvas and every boundary — is solved as its own small problem, bottom-up, so a boundary is placed as one measured block and always reads as a contiguous region. Inside a container, items are assigned to layers along the view direction from the relationships between them, then ordered into bands across it.
+
+The container's own `layout.mode` chooses how it arranges its members: `column` and `row` keep them in one fixed lane in the declared sequence, `grid` uses fixed columns, and anything else lays them out in layers. Within a layer an explicit `order` is honoured exactly; unranked siblings are placed by the barycenter of what they connect to and then by ID.
+
+Unlike the graph-backend families, this one supports explicit ports, attaches each connector to the compartment it is drawn against, distributes connectors that share a component side into separate lanes and corridors, and evaluates a bounded set of spacing and lane strategies, keeping the best by measured quality.
+
 ### Internal route compartments
 
-`visual.portLabels: inside` draws a component's declared `ports` as labeled compartments inside the component — a gateway's route table, not an infrastructure boundary. Each compartment is measured before layout, the connector that names the port through `sourcePort`/`targetPort` is pinned to that compartment's own edge, and the renderer draws the same measured rectangle, so the visible route table and the attachment geometry cannot drift apart. Compartments widen the component rather than clipping a long route label. Explicit ports remain unsupported in the experimental `sequence`, `swimlanes`, `comparison` and `architecture-map` families, which report `TOP402_COMPOSITION_PORT_UNSUPPORTED` instead of ignoring them.
+`visual.portLabels: inside` draws a component's declared `ports` as labeled compartments inside the component — a gateway's route table, not an infrastructure boundary. Each compartment is measured before layout, the connector that names the port through `sourcePort`/`targetPort` is pinned to that compartment's own edge, and the renderer draws the same measured rectangle, so the visible route table and the attachment geometry cannot drift apart. Compartments widen the component rather than clipping a long route label. Compartments are supported by `topology`, `layers` and `architecture`. Explicit ports remain unsupported in the experimental `sequence`, `swimlanes`, `comparison` and `architecture-map` families, which report `TOP402_COMPOSITION_PORT_UNSUPPORTED` instead of ignoring them.
 
 ### Sibling order
 

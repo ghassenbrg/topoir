@@ -82,7 +82,7 @@ describe("TopoIR compiler", () => {
     const source = await readFile(path, "utf8");
     const result = await new TopoIRCompiler().compile(source, { source: path, format: "svg" });
 
-    expect(result.artifacts[0]?.sha256).toBe("26fce4879da6203b1bbba55e1a0d5f6fbbeb220e3ee7976bb1a8e39103865c4d");
+    expect(result.artifacts[0]?.sha256).toBe("080c294bef1100b4f8888c8f2b9f614666fe7cec6a96b7abbc06f03d4c34aed6");
     expect(result.views[0]?.geometry.bounds).toEqual({ x: 0, y: 0, width: 1068.27, height: 198 });
   });
 });

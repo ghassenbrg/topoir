@@ -11,6 +11,7 @@ import type {
   TopoIRDocument,
   ViewDefinition,
   DesignIntent,
+  DesignTokens,
 } from "@topoir/schema";
 
 export interface NormalizedGroup
@@ -75,7 +76,7 @@ export interface ViewGraph {
   readonly id: string;
   readonly title: string;
   readonly description?: string;
-  readonly theme: string;
+  readonly theme: string | DesignTokens;
   readonly showLegend: boolean;
   readonly design?: DesignIntent;
   readonly layout: {

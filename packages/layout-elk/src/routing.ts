@@ -1,9 +1,29 @@
 import type { Point, Rect } from "@topoir/core";
 
-/** Orthogonal visibility-grid A*. Bend penalties prefer simple readable routes. */
-export function obstacleRoute(start: Point, end: Point, obstacles: readonly Rect[]): readonly Point[] | undefined {
-  const xs = [...new Set([start.x, end.x, ...obstacles.flatMap((r) => [r.x - 8, r.x + r.width + 8])])].sort((a, b) => a - b);
-  const ys = [...new Set([start.y, end.y, ...obstacles.flatMap((r) => [r.y - 8, r.y + r.height + 8])])].sort((a, b) => a - b);
+/**
+ * Orthogonal visibility-grid A*. Bend penalties prefer simple readable routes, and
+ * `taken` charges for running along a corridor another route already occupies, so two
+ * connectors do not collapse onto one line.
+ */
+export function obstacleRoute(
+  start: Point,
+  end: Point,
+  obstacles: readonly Rect[],
+  taken: readonly (readonly [Point, Point])[] = [],
+  protect: readonly Rect[] = [],
+): readonly Point[] | undefined {
+  // An endpoint can sit inside a neighbour's inflated obstacle in a dense scene. Keeping
+  // that obstacle makes the endpoint unreachable and the search returns nothing, so the
+  // caller silently falls back to a route that cuts through components.
+  const encloses = (rect: Rect, point: Point) =>
+    point.x > rect.x && point.x < rect.x + rect.width && point.y > rect.y && point.y < rect.y + rect.height;
+  // An endpoint's own component is never dropped: a route that leaves a component and
+  // runs back across it reads as an arrow leaving the wrong side.
+  const usable = obstacles.filter(
+    (rect) => protect.includes(rect) || (!encloses(rect, start) && !encloses(rect, end)),
+  );
+  const xs = [...new Set([start.x, end.x, ...usable.flatMap((r) => [r.x - 8, r.x + r.width + 8])])].sort((a, b) => a - b);
+  const ys = [...new Set([start.y, end.y, ...usable.flatMap((r) => [r.y - 8, r.y + r.height + 8])])].sort((a, b) => a - b);
   const width = xs.length;
   const total = width * ys.length;
   if (total > 100000) return undefined;
@@ -14,7 +34,7 @@ export function obstacleRoute(start: Point, end: Point, obstacles: readonly Rect
   const heap = new MinHeap();
   heap.push({ state: first, cost: 0, score: distance(start, end) });
   let iterations = 0;
-  while (heap.size && iterations++ < total * 4) {
+  while (heap.size && iterations++ < total * 12) {
     const current = heap.pop()!;
     if (current.cost !== costs.get(current.state)) continue;
     const cell = Math.floor(current.state / 2), direction = current.state % 2;
@@ -30,13 +50,32 @@ export function obstacleRoute(start: Point, end: Point, obstacles: readonly Rect
     for (const [nx, ny, nd] of [[x - 1, y, 0], [x + 1, y, 0], [x, y - 1, 1], [x, y + 1, 1]] as const) {
       if (nx < 0 || nx >= width || ny < 0 || ny >= ys.length) continue;
       const b = { x: xs[nx]!, y: ys[ny]! };
-      if (obstacles.some((r) => segmentHitsRect(a, b, r))) continue;
+      if (usable.some((r) => segmentHitsRect(a, b, r))) continue;
       const next = (ny * width + nx) * 2 + nd;
-      const cost = current.cost + distance(a, b) + (nd !== direction ? 18 : 0);
+      const cost = current.cost + distance(a, b) + (nd !== direction ? 18 : 0) + occupancy(a, b, taken) * 30;
       if (cost < (costs.get(next) ?? Infinity)) { costs.set(next, cost); parents.set(next, current.state); heap.push({ state: next, cost, score: cost + distance(b, end) }); }
     }
   }
   return undefined;
+}
+
+/** How much of a lattice step runs along a corridor an earlier route already uses. */
+function occupancy(a: Point, b: Point, taken: readonly (readonly [Point, Point])[]): number {
+  if (taken.length === 0) return 0;
+  const tolerance = 1.5;
+  const vertical = Math.abs(a.x - b.x) < tolerance;
+  let shared = 0;
+  for (const [start, end] of taken) {
+    if ((Math.abs(start.x - end.x) < tolerance) !== vertical) continue;
+    const axis = vertical ? "x" : "y";
+    if (Math.abs(a[axis] - start[axis]) > tolerance) continue;
+    const along = vertical ? "y" : "x";
+    const overlap =
+      Math.min(Math.max(a[along], b[along]), Math.max(start[along], end[along])) -
+      Math.max(Math.min(a[along], b[along]), Math.min(start[along], end[along]));
+    if (overlap > shared) shared = overlap;
+  }
+  return Math.max(0, shared);
 }
 
 export function segmentHitsRect(a: Point, b: Point, r: Rect): boolean {

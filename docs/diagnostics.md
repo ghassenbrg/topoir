@@ -38,8 +38,11 @@ Do not parse message wording. Match `code`, then use `path` and `range` to edit 
 | `TOP322_ASSET_NOT_FOUND` | Discover the correct inventory ID; explicit `visual.asset` is an error, optional technology/icon fallback is a warning |
 | `TOP323_ASSET_OVERRIDDEN` | `visual.assets` is the complete ordered asset list for a component, so a separate `visual.asset` is not rendered; fold it into `visual.assets` or remove it |
 | `TOP402_COMPOSITION_PORT_UNSUPPORTED` | Use topology/layers for explicit endpoint ports; experimental panels/sequence do not yet honor them |
+| `TOP412_RELATIONSHIP_DROPPED` | A declared relationship produced no route and is missing from the diagram; a layout backend lost it |
+| `TOP413_COMPONENT_DROPPED` | A declared component was not placed and is missing from the diagram |
 | `TOP423_ILLEGAL_BOUNDARY_CROSSING` | A connector enters or leaves a boundary more often than its endpoints require; inspect the route or the composition |
 | `TOP424_EDGE_CROSSES_OWN_ENDPOINT` | A connector runs back across its own source or target component, so the arrow appears to leave the wrong side; inspect the route |
+| `TOP425_EDGE_SEGMENTS_COINCIDENT` | Two connectors are drawn along the same line for a visible stretch, so two relationships read as one; inspect the composition or report a routing defect |
 | `TOP430_LABEL_OVERLAP` | Inspect colliding node, heading, annotation or edge label; revise composition or report a refinement defect |
 | `TOP431_GROUP_TITLE_INTERSECTION` | A connector crosses a boundary heading; inspect the route/refinement |
 | `TOP432_ANNOTATION_OVERLAP` | A note overlaps a node, heading or another annotation |

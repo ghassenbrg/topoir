@@ -1,6 +1,7 @@
-import { analyzeGeometry, type GeometryView, type GeometryNode, type GeometryGroup, type GeometryEdge, type LayoutResult, type LayoutEngine, type MeasuredView, type Point, type Rect, type MeasuredNode } from "@topoir/core";
+import { analyzeGeometry, type GeometryView, type GeometryNode, type GeometryGroup, type GeometryEdge, type GeometryPort, type GeometryAnnotation, type LayoutResult, type LayoutEngine, type MeasuredView, type Point, type Rect, type MeasuredNode } from "@topoir/core";
 import { ElkLayoutEngine } from "./index.js";
 import { obstacleRoute, segmentHitsRect } from "./routing.js";
+import { banded, type BandedSpacing } from "./banded.js";
 
 /** Compiler-owned composition. Fixed candidate order is also the tie-break order. */
 export class CompositionEngine implements LayoutEngine {
@@ -12,13 +13,76 @@ export class CompositionEngine implements LayoutEngine {
       return { diagnostics: [{ code: "TOP402_COMPOSITION_PORT_UNSUPPORTED", severity: "error", message: `${kind} does not yet support explicit endpoint ports. Use topology/layers or omit the port constraints.` }] };
     }
     if (kind === "sequence") return { geometry: sequence(view), diagnostics: [], metrics: { candidatesEvaluated: 1 } };
-    if (kind === "comparison" || kind === "swimlanes" || kind === "architecture-map") return { geometry: panels(view, kind), diagnostics: [], metrics: { candidatesEvaluated: 1 } };
+    if (kind === "comparison" || kind === "swimlanes" || kind === "architecture-map") {
+      // Lane distribution separates bundled connectors but costs bends, so let the score
+      // decide rather than imposing it.
+      const routings: [boolean, LaneOrder][] = [[true, "fan"], [true, "reach"], [false, "fan"]];
+      const evaluated = routings.map(([distributeLanes, laneOrder]) => {
+        const geometry = panels(view, kind, distributeLanes, laneOrder);
+        return { geometry, score: compositionScore(view, geometry) };
+      });
+      evaluated.sort((left, right) => left.score - right.score);
+      const chosen = evaluated[0]!;
+      return { geometry: chosen.geometry, diagnostics: [], metrics: { candidatesEvaluated: evaluated.length, compositionScore: chosen.score } };
+    }
+    if (kind === "architecture") {
+      // Compiler-owned composition: bands are chosen here, so the free parameters are how
+      // much room to give them and how connectors share a component side. Candidates are
+      // ordered best-first and evaluation stops at the first defect-free one, because
+      // scoring all nine costs several times a clean result and buys nothing.
+      // A refinement budget that scales with the problem. Every candidate re-routes the
+      // whole graph, so nine of them on a dense model costs tens of seconds for a
+      // marginal gain; a small model can afford the full search.
+      const density = view.edges.length;
+      const allSpacings: BandedSpacing[] = [
+        { node: 36, layer: 76 },
+        { node: 48, layer: 104 },
+        { node: 28, layer: 60 },
+      ];
+      const allRoutings: [boolean, LaneOrder][] = [[true, "fan"], [true, "reach"], [false, "fan"]];
+      const spacings = density > 45 ? allSpacings.slice(0, 1) : density > 24 ? allSpacings.slice(0, 2) : allSpacings;
+      const routings = density > 45 ? allRoutings.slice(0, 2) : allRoutings;
+      // Ranked by how many measurable defects remain, then by the weighted score. A
+      // crossing is a legibility cost; a hidden connector or a clipped label is a defect,
+      // and no amount of weighting should let the second win.
+      let best: { geometry: GeometryView; score: number; defects: number } | undefined;
+      let evaluated = 0;
+      for (const spacing of spacings) {
+        const placed = banded(view, spacing);
+        for (const [distributeLanes, laneOrder] of routings) {
+          const routed = separateCoincidentRoutes(view, refineRoutes(view, { ...placed, edges: routeEdges(view, placed.nodes, placed.groups, distributeLanes, laneOrder) }));
+          const annotations = placeAnnotations(view, routed.nodes, routed.groups, routed.edges, placed.bounds.height);
+          const extents = [...routed.nodes, ...routed.groups, ...annotations];
+          const geometry = refineLabels(view, {
+            ...routed,
+            annotations,
+            bounds: {
+              x: 0,
+              y: 0,
+              width: Math.max(0, ...extents.map((rect) => rect.x + rect.width)) + 24,
+              height: Math.max(0, ...extents.map((rect) => rect.y + rect.height)) + 24,
+            },
+          });
+          evaluated += 1;
+          const score = compositionScore(view, geometry);
+          const defects = defectCount(view, geometry);
+          if (!best || defects < best.defects || (defects === best.defects && score < best.score)) {
+            best = { geometry, score, defects };
+          }
+          if (defects === 0 && analyzeGeometry(view, geometry).metrics.edgeCrossings === 0) {
+            return { geometry, diagnostics: [], metrics: { candidatesEvaluated: evaluated, compositionScore: score } };
+          }
+        }
+      }
+      if (!best) return { diagnostics: [{ code: "TOP400_LAYOUT_FAILED", severity: "error", message: "No composition candidate could be laid out." }] };
+      return { geometry: best.geometry, diagnostics: [], metrics: { candidatesEvaluated: evaluated, compositionScore: best.score } };
+    }
     const candidates: { result: LayoutResult; score: number }[] = [];
     const optimize = view.design?.optimize !== false && view.design !== undefined;
     for (const [seed, spacing] of (optimize ? [[1, view.layout.spacing], [7, "compact"], [19, "normal"]] : [[1, view.layout.spacing]]) as [number, MeasuredView["layout"]["spacing"]][]) {
       const result = await new ElkLayoutEngine({ seed }).layout({ ...view, layout: { ...view.layout, spacing } });
       if (result.geometry) {
-        const geometry = refineLabels(view, optimize ? refineRoutes(view, result.geometry) : result.geometry);
+        const geometry = refineLabels(view, separateCoincidentRoutes(view, optimize ? refineRoutes(view, result.geometry) : result.geometry));
         candidates.push({ result: { ...result, geometry }, score: compositionScore(view, geometry) });
       } else if (!candidates.length && !optimize) return result;
     }
@@ -27,6 +91,25 @@ export class CompositionEngine implements LayoutEngine {
     if (!best) return { diagnostics: [{ code: "TOP400_LAYOUT_FAILED", severity: "error", message: "No composition candidate could be laid out." }] };
     return { ...best.result, metrics: { ...best.result.metrics, candidatesEvaluated: candidates.length, compositionScore: best.score } };
   }
+}
+
+/** How many measurable defects remain. Crossings are a legibility cost, not a defect. */
+function defectCount(view: MeasuredView, geometry: GeometryView): number {
+  const { metrics } = analyzeGeometry(view, geometry);
+  return (
+    metrics.nodeOverlaps +
+    metrics.edgeNodeIntersections +
+    metrics.endpointBodyCrossings +
+    metrics.nonOrthogonalSegments +
+    metrics.emptyRoutes +
+    metrics.droppedRelationships +
+    metrics.droppedComponents +
+    metrics.labelOverlaps +
+    metrics.annotationOverlaps +
+    metrics.groupTitleIntersections +
+    metrics.coincidentEdgeSegments +
+    metrics.illegalBoundaryCrossings
+  );
 }
 
 export function compositionScore(view: MeasuredView, geometry: GeometryView): number {
@@ -38,7 +121,7 @@ export function compositionScore(view: MeasuredView, geometry: GeometryView): nu
     for (let i = 1; i < edge.points.length; i++) length += distance(edge.points[i - 1]!, edge.points[i]!);
   }
   const aspect = Math.abs(Math.log((geometry.bounds.width / Math.max(1, geometry.bounds.height)) / view.layout.aspectRatio));
-  return defects * 1e9 + (q.metrics.labelOverlaps + q.metrics.annotationOverlaps + q.metrics.groupTitleIntersections) * 1e6 + q.metrics.endpointBodyCrossings * 20000 + q.metrics.illegalBoundaryCrossings * 10000 + q.metrics.edgeCrossings * 1000 + aspect * 500 + bends * 8 + length * 0.015;
+  return (q.metrics.droppedRelationships + q.metrics.droppedComponents) * 1e12 + defects * 1e9 + (q.metrics.labelOverlaps + q.metrics.annotationOverlaps + q.metrics.groupTitleIntersections) * 1e6 + q.metrics.endpointBodyCrossings * 20000 + q.metrics.illegalBoundaryCrossings * 10000 + q.metrics.coincidentEdgeSegments * 3000 + q.metrics.edgeCrossings * 1000 + aspect * 500 + bends * 8 + length * 0.015;
 }
 
 function sequence(view: MeasuredView): GeometryView {
@@ -74,7 +157,7 @@ function sequence(view: MeasuredView): GeometryView {
 
 interface Block { id: string; width: number; height: number; node?: MeasuredNode; children?: { block: Block; x: number; y: number }[]; parent?: string }
 
-function panels(view: MeasuredView, kind: "comparison" | "swimlanes" | "architecture-map"): GeometryView {
+function panels(view: MeasuredView, kind: "comparison" | "swimlanes" | "architecture-map", distributeLanes: boolean, laneOrder: LaneOrder): GeometryView {
   const build = (id?: string): Block => {
     const group = view.groups.find((item) => item.id === id);
     const blocks: Block[] = [
@@ -144,37 +227,279 @@ function panels(view: MeasuredView, kind: "comparison" | "swimlanes" | "architec
     }
   };
   walk(root, 0, 0);
-  const annotations = view.annotations.map((annotation, index) => ({ id: annotation.id, x: 24 + index * (annotation.width + 24), y: root.height + 20, width: annotation.width, height: annotation.height }));
-  const nodeById = new Map(nodes.map((node) => [node.id, node]));
-  const edges: GeometryEdge[] = view.edges.map((edge) => {
-    const source = nodeById.get(edge.from)!, target = nodeById.get(edge.to)!;
-    const horizontal = Math.abs(source.x - target.x) > Math.abs(source.y - target.y);
-    const forward = horizontal ? source.x < target.x : source.y < target.y;
-    const a = horizontal ? { x: source.x + (forward ? source.width : 0), y: source.y + source.height / 2 } : { x: source.x + source.width / 2, y: source.y + (forward ? source.height : 0) };
-    const b = horizontal ? { x: target.x + (forward ? 0 : target.width), y: target.y + target.height / 2 } : { x: target.x + target.width / 2, y: target.y + (forward ? 0 : target.height) };
-    const belongs = (nodeId: string, groupId: string): boolean => {
-      let current = view.nodes.find((node) => node.id === nodeId)?.group;
-      while (current) {
-        if (current === groupId) return true;
-        current = view.groups.find((group) => group.id === current)?.parent;
-      }
-      return false;
-    };
-    const obstacles: Rect[] = [
-      // Endpoints are obstacles at their exact silhouette: a route may leave or arrive
-      // perpendicular to an edge of the card, but must never run back across its body.
-      source, target,
-      ...nodes.filter((node) => node !== source && node !== target).map((node) => inflate(node, 10)),
-      ...groups.map((group) => ({ ...group, height: view.groups.find((item) => item.id === group.id)?.titleHeight ?? 38 })),
-      ...groups.filter((group) => !belongs(edge.from, group.id) && !belongs(edge.to, group.id)).map((group) => inflate(group, 6)),
-    ];
-    const points = route(a, b, obstacles);
-    return { id: edge.id, points, ...(edge.labelText ? { label: { x: (a.x + b.x) / 2 - (edge.labelText.width + 14) / 2, y: (a.y + b.y) / 2 - edge.labelText.height - 14, width: edge.labelText.width + 14, height: edge.labelText.height + 8, text: edge.label ?? edge.protocol ?? "" } } : {}) };
-  });
+  const edges = routeEdges(view, nodes, groups, distributeLanes, laneOrder);
+  const annotations = placeAnnotations(view, nodes, groups, edges, root.height);
   return refineLabels(view, { id: view.id, nodes, groups, edges, annotations, bounds: { x: 0, y: 0, width: Math.max(root.width, ...annotations.map((a) => a.x + a.width + 24)), height: root.height + (annotations.length ? Math.max(...annotations.map((a) => a.height)) + 44 : 0) } });
 }
 
-function route(a: Point, b: Point, obstacles: readonly Rect[]): Point[] {
+/**
+ * Pad an obstacle, but never so far that it swallows one of the route's own endpoints.
+ *
+ * The router has to drop an obstacle that encloses an endpoint, because the endpoint
+ * would otherwise be unreachable. Padding a boundary by a few pixels is enough to engulf
+ * a component sitting just outside it, and dropping the boundary then lets the connector
+ * cut straight through a region it should never enter. Reducing the padding keeps the
+ * barrier.
+ */
+function paddedClear(rect: Rect, padding: number, points: readonly Point[]): Rect {
+  const encloses = (candidate: Rect, point: Point) =>
+    point.x > candidate.x && point.x < candidate.x + candidate.width &&
+    point.y > candidate.y && point.y < candidate.y + candidate.height;
+  for (let amount = padding; amount > 0; amount -= 2) {
+    const candidate = inflate(rect, amount);
+    if (!points.some((point) => encloses(candidate, point))) return candidate;
+  }
+  return rect;
+}
+
+/** Every boundary a component sits inside, memoised per view. */
+const ancestorCache = new WeakMap<MeasuredView, Map<string, Set<string>>>();
+function ancestorsOf(view: MeasuredView, nodeId: string): Set<string> {
+  let cache = ancestorCache.get(view);
+  if (!cache) {
+    cache = new Map();
+    const parentOfGroup = new Map(view.groups.map((group) => [group.id, group.parent]));
+    for (const node of view.nodes) {
+      const chain = new Set<string>();
+      let current = node.group;
+      while (current !== undefined && !chain.has(current)) {
+        chain.add(current);
+        current = parentOfGroup.get(current);
+      }
+      cache.set(node.id, chain);
+    }
+    ancestorCache.set(view, cache);
+  }
+  return cache.get(nodeId) ?? new Set();
+}
+
+/**
+ * Everything a connector must route around.
+ *
+ * The same list is used when routes are first laid and whenever a repair pass reroutes
+ * one. The repair passes previously treated only boundary headings as obstacles and
+ * ignored the boundaries themselves, so a repaired connector could cut straight through a
+ * region it had no business entering — the most common boundary defect in the corpus.
+ */
+function routingObstacles(
+  view: MeasuredView,
+  geometry: { readonly nodes: readonly GeometryNode[]; readonly groups: readonly GeometryGroup[] },
+  from: string | undefined,
+  to: string | undefined,
+  ends: readonly Point[],
+  nodePadding: number,
+): { obstacles: Rect[]; endpoints: Rect[]; crossOnce: Rect[] } {
+  const belongs = (nodeId: string | undefined, groupId: string): boolean =>
+    nodeId !== undefined && ancestorsOf(view, nodeId).has(groupId);
+  const endpoints = geometry.nodes.filter((node) => node.id === from || node.id === to);
+  const headings = geometry.groups.map((group) => ({
+    ...group,
+    height: view.groups.find((item) => item.id === group.id)?.titleHeight ?? 38,
+  }));
+  const outside = geometry.groups.filter((group) => !belongs(from, group.id) && !belongs(to, group.id));
+  const crossOnce = geometry.groups.filter((group) => belongs(from, group.id) !== belongs(to, group.id));
+  return {
+    obstacles: [
+      ...endpoints,
+      ...geometry.nodes.filter((node) => node.id !== from && node.id !== to).map((node) => paddedClear(node, nodePadding, ends)),
+      ...headings,
+      ...outside.map((group) => paddedClear(group, 6, ends)),
+    ],
+    endpoints,
+    crossOnce,
+  };
+}
+
+export type LaneOrder = "fan" | "reach";
+
+/**
+ * Route every edge around the composition's own obstacles.
+ *
+ * An endpoint that names a port leaves through that port's side on a short stub, so the
+ * arrow visibly belongs to the compartment it was measured against. Other endpoints leave
+ * through the side facing the target. Both endpoint silhouettes, every other component,
+ * every boundary heading and every boundary neither endpoint belongs to are obstacles.
+ */
+export function routeEdges(
+  view: MeasuredView,
+  nodes: readonly GeometryNode[],
+  groups: readonly GeometryGroup[],
+  distributeLanes = true,
+  laneOrder: LaneOrder = "fan",
+): GeometryEdge[] {
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const belongs = (nodeId: string, groupId: string): boolean => {
+    let current = view.nodes.find((node) => node.id === nodeId)?.group;
+    while (current) {
+      if (current === groupId) return true;
+      current = view.groups.find((group) => group.id === current)?.parent;
+    }
+    return false;
+  };
+  const outward = (side: GeometryPort["side"], stub: number): Point =>
+    side === "west" ? { x: -stub, y: 0 } : side === "east" ? { x: stub, y: 0 } : side === "north" ? { x: 0, y: -stub } : { x: 0, y: stub };
+
+  // Which side of each component every endpoint leaves through. An endpoint that names a
+  // port is already fixed to its measured compartment.
+  const attachments = view.edges.map((edge) => {
+    const source = nodeById.get(edge.from)!;
+    const target = nodeById.get(edge.to)!;
+    const sourcePort = edge.sourcePort === undefined ? undefined : source.ports.find((port) => port.id === edge.sourcePort);
+    const targetPort = edge.targetPort === undefined ? undefined : target.ports.find((port) => port.id === edge.targetPort);
+    const horizontal = Math.abs(source.x - target.x) > Math.abs(source.y - target.y);
+    const forward = horizontal ? source.x < target.x : source.y < target.y;
+    const sourceSide: GeometryPort["side"] = sourcePort ? sourcePort.side : horizontal ? (forward ? "east" : "west") : forward ? "south" : "north";
+    const targetSide: GeometryPort["side"] = targetPort ? targetPort.side : horizontal ? (forward ? "west" : "east") : forward ? "north" : "south";
+    return { edge, source, target, sourcePort, targetPort, sourceSide, targetSide };
+  });
+
+  /**
+   * Spread the free endpoints that share one component side into lanes. Without this every
+   * connector into a side collapses onto the same point and several relationships are
+   * drawn as a single line. Lane order follows the far endpoint's position across the
+   * side, so distributing them does not introduce crossings.
+   */
+  const lanes = new Map<string, number>();
+  const corridors = new Map<string, number>();
+  // One lane sequence per component side, whatever direction each connector runs in.
+  // Separating arrivals from departures gives both the same fractions, so a connector
+  // leaving a component lands on the point another one arrives at and the two are drawn
+  // as a single line.
+  type Attachment = (typeof attachments)[number];
+  const buckets = new Map<string, { attachment: Attachment; role: "source" | "target" }[]>();
+  for (const attachment of attachments) {
+    for (const role of ["source", "target"] as const) {
+      const fixed = role === "source" ? attachment.sourcePort : attachment.targetPort;
+      if (fixed) continue;
+      const node = role === "source" ? attachment.source : attachment.target;
+      const side = role === "source" ? attachment.sourceSide : attachment.targetSide;
+      const key = `${node.id}|${side}`;
+      buckets.set(key, [...(buckets.get(key) ?? []), { attachment, role }]);
+    }
+  }
+  if (distributeLanes) {
+    for (const [key, bucket] of buckets) {
+      if (bucket.length < 2) continue;
+      const [nodeId, side] = key.split("|") as [string, GeometryPort["side"]];
+      const across = side === "east" || side === "west" ? "y" : "x";
+      const node = nodeById.get(nodeId)!;
+      const far = (entry: (typeof bucket)[number]) =>
+        entry.role === "source" ? entry.attachment.target : entry.attachment.source;
+      // Lane order follows how far each connector has to run, coarsely bucketed: the
+      // longest run takes the outermost lane, so its turn happens beyond every shorter
+      // run and the horizontals nest instead of crossing. Runs of similar length fall in
+      // the same bucket and are then ordered by the band they come from, which keeps
+      // parallel approaches from a single column in their natural sequence.
+      const runLength = (entry: (typeof bucket)[number]) => {
+        const other = far(entry);
+        return across === "y"
+          ? Math.abs(other.x + other.width / 2 - (node.x + node.width / 2))
+          : Math.abs(other.y + other.height / 2 - (node.y + node.height / 2));
+      };
+      const identity = (entry: (typeof bucket)[number]) => `${entry.attachment.edge.id}|${entry.role}`;
+      const fanKey = (entry: (typeof bucket)[number]) => {
+        const other = far(entry);
+        return across === "y" ? other.y + other.height / 2 : other.x + other.width / 2;
+      };
+      // Two orderings are useful and neither wins everywhere, so both are scored.
+      // "fan" spreads a bundle in the order of the components it reaches, which keeps a
+      // fan-out monotone. "reach" gives the longest run the outermost lane, which keeps a
+      // fan-in's long horizontals nested underneath the short ones.
+      const ordered = [...bucket].sort((left, right) => {
+        const primary =
+          laneOrder === "fan"
+            ? fanKey(left) - fanKey(right)
+            : Math.round(runLength(left) / 64) - Math.round(runLength(right) / 64);
+        if (primary !== 0) return primary;
+        const secondary =
+          laneOrder === "fan"
+            ? Math.round(runLength(left) / 64) - Math.round(runLength(right) / 64)
+            : fanKey(left) - fanKey(right);
+        if (secondary !== 0) return secondary;
+        return identity(left).localeCompare(identity(right), "en");
+      });
+      // A side that already carries measured route compartments keeps them: free
+      // endpoints are distributed only across the part of the side the slots leave open.
+      const measured = view.nodes.find((node) => node.id === nodeId);
+      const reserved = (measured?.ports ?? []).flatMap((port) => (port.slot && (port.side === side || (port.side === "auto" && side === "east")) ? [port.slot] : []));
+      const span = across === "y" ? (measured?.height ?? 1) : (measured?.width ?? 1);
+      const blockedFrom = reserved.length === 0 ? 1 : Math.min(...reserved.map((slot) => (across === "y" ? slot.y : slot.x))) / Math.max(1, span);
+      const limit = Math.max(0.2, blockedFrom);
+      for (const [index, entry] of ordered.entries()) {
+        lanes.set(identity(entry), (limit * (index + 1)) / (ordered.length + 1));
+        // Each lane also turns at its own distance from the component, otherwise the
+        // separated endpoints immediately rejoin into a single shared corridor.
+        corridors.set(identity(entry), 18 + index * 16);
+      }
+    }
+  }
+
+  const sidePoint = (rect: Rect, side: GeometryPort["side"], fraction: number): Point =>
+    side === "west" ? { x: rect.x, y: rect.y + rect.height * fraction }
+    : side === "east" ? { x: rect.x + rect.width, y: rect.y + rect.height * fraction }
+    : side === "north" ? { x: rect.x + rect.width * fraction, y: rect.y }
+    : { x: rect.x + rect.width * fraction, y: rect.y + rect.height };
+
+  // Deterministic order: longer runs are routed first so they claim the outer corridors
+  // before the short connectors fill the cheap ones.
+  const span = (entry: (typeof attachments)[number]) =>
+    Math.abs(entry.source.x - entry.target.x) + Math.abs(entry.source.y - entry.target.y);
+  const order = [...attachments].sort((left, right) => span(right) - span(left) || left.edge.id.localeCompare(right.edge.id, "en"));
+  const taken: [Point, Point][] = [];
+  const routed = new Map<string, GeometryEdge>();
+  for (const { edge, source, target, sourcePort, targetPort, sourceSide, targetSide } of order) {
+    const a: Point = sourcePort
+      ? { x: sourcePort.x, y: sourcePort.y }
+      : sidePoint(source, sourceSide, lanes.get(`${edge.id}|source`) ?? 0.5);
+    const b: Point = targetPort
+      ? { x: targetPort.x, y: targetPort.y }
+      : sidePoint(target, targetSide, lanes.get(`${edge.id}|target`) ?? 0.5);
+
+    // A compartment endpoint always stubs out so it visibly leaves the route row it is
+    // drawn against. A laned endpoint stubs to its own corridor. Everything else leaves
+    // directly, which keeps single connectors free of a pointless bend.
+    const aStub = sourcePort ? 22 : (corridors.get(`${edge.id}|source`) ?? 0);
+    const bStub = targetPort ? 22 : (corridors.get(`${edge.id}|target`) ?? 0);
+    const aStep = aStub === 0 ? { x: 0, y: 0 } : outward(sourceSide, aStub);
+    const bStep = bStub === 0 ? { x: 0, y: 0 } : outward(targetSide, bStub);
+    const aFrom: Point = { x: a.x + aStep.x, y: a.y + aStep.y };
+    const bTo: Point = { x: b.x + bStep.x, y: b.y + bStep.y };
+
+    const { obstacles, crossOnce } = routingObstacles(view, { nodes, groups }, edge.from, edge.to, [a, b, aFrom, bTo], 10);
+    const middle = route(aFrom, bTo, obstacles, taken, crossOnce, [source, target]);
+    const points = simplify([a, ...middle, b]);
+    for (let index = 1; index < points.length; index += 1) taken.push([points[index - 1]!, points[index]!]);
+    const label = edge.labelText;
+    routed.set(edge.id, {
+      id: edge.id,
+      points,
+      ...(label
+        ? {
+            label: {
+              x: (a.x + b.x) / 2 - (label.width + 14) / 2,
+              y: (a.y + b.y) / 2 - label.height - 14,
+              width: label.width + 14,
+              height: label.height + 8,
+              text: edge.label ?? edge.protocol ?? "",
+            },
+          }
+        : {}),
+    });
+  }
+  // Emit in document order so the scene graph stays stable.
+  return view.edges.map((edge) => routed.get(edge.id)!);
+}
+
+/**
+ * One edge's orthogonal route.
+ *
+ * `taken` carries the segments of the routes already chosen in this pass. Two connectors
+ * that both have to bypass the same components would otherwise pick the same cheapest
+ * corridor and be drawn on top of each other, so sharing a corridor is charged for. It is
+ * a preference, not a prohibition: a route still takes a shared corridor when the
+ * alternatives are far worse.
+ */
+function route(a: Point, b: Point, obstacles: readonly Rect[], taken: readonly [Point, Point][] = [], crossOnce: readonly Rect[] = [], protect: readonly Rect[] = []): Point[] {
   const midX = (a.x + b.x) / 2, midY = (a.y + b.y) / 2;
   const candidates: Point[][] = [
     [a, { x: b.x, y: a.y }, b], [a, { x: a.x, y: b.y }, b],
@@ -185,37 +510,235 @@ function route(a: Point, b: Point, obstacles: readonly Rect[]): Point[] {
   const ys = [...new Set(obstacles.flatMap((o) => [o.y - 8, o.y + o.height + 8]))];
   for (const x of xs) candidates.push([a, { x, y: a.y }, { x, y: b.y }, b]);
   for (const y of ys) candidates.push([a, { x: a.x, y }, { x: b.x, y }, b]);
-  const scored = candidates.map((points) => ({ points: simplify(points), cost: points.slice(1).reduce((sum, p, i) => sum + distance(points[i]!, p) + obstacles.filter((r) => intersects(points[i]!, p, r)).length * 1e7, 0) }));
+  const scored = candidates.map((points) => {
+    const simplified = simplify(points);
+    let cost = 0;
+    for (let index = 1; index < points.length; index += 1) {
+      const start = points[index - 1]!, end = points[index]!;
+      cost += distance(start, end);
+      cost += obstacles.filter((rect) => intersects(start, end, rect)).length * 1e7;
+      cost += sharedLength(start, end, taken) * 40;
+    }
+    // A boundary with one endpoint inside it should be entered once. A route that
+    // wanders back out and in again reads as if it left the region and returned.
+    for (const rect of crossOnce) cost += Math.abs(crossingCount(simplified, rect) - 1) * 6000;
+    return { points: simplified, cost };
+  });
+  // The visibility-grid router is a peer candidate, not a last resort. It is the only one
+  // that can find a route through a crowded scene, and scoring it against the cheap
+  // candidates under the same cost function keeps simple connectors simple. It is also by
+  // far the most expensive step, so it is skipped when a cheap candidate is already
+  // faultless — it could not beat one.
   scored.sort((l, r) => l.cost - r.cost);
-  if ((scored[0]?.cost ?? 0) >= 1e7) {
-    const detour = obstacleRoute(a, b, obstacles);
-    if (detour) return [...detour];
+  const cheapest = scored[0];
+  const flawless =
+    cheapest !== undefined &&
+    cheapest.cost < 1e7 &&
+    cheapest.points.slice(1).every((point, index) => sharedLength(cheapest.points[index]!, point, taken) < 12) &&
+    crossOnce.every((rect) => crossingCount(cheapest.points, rect) === 1);
+  if (flawless) return cheapest.points;
+
+  const lattice = obstacleRoute(a, b, obstacles, taken, protect);
+  if (lattice && lattice.length >= 2) {
+    const points = [...lattice];
+    let cost = 0;
+    for (let index = 1; index < points.length; index += 1) {
+      const start = points[index - 1]!, end = points[index]!;
+      cost += distance(start, end);
+      cost += obstacles.filter((rect) => intersects(start, end, rect)).length * 1e7;
+      cost += sharedLength(start, end, taken) * 40;
+    }
+    for (const rect of crossOnce) cost += Math.abs(crossingCount(points, rect) - 1) * 6000;
+    // A lattice route bends more by nature, so only take it when it is genuinely better.
+    scored.push({ points: simplify(points), cost: cost + Math.max(0, points.length - 3) * 10 });
   }
+  scored.sort((l, r) => l.cost - r.cost);
   return scored[0]?.points ?? [a, b];
+}
+
+/** How many times a polyline passes through a rectangle's border. */
+function crossingCount(points: readonly Point[], rect: Rect): number {
+  const inside = (point: Point) =>
+    point.x > rect.x && point.x < rect.x + rect.width && point.y > rect.y && point.y < rect.y + rect.height;
+  let crossings = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    const start = points[index - 1]!, end = points[index]!;
+    const steps = Math.max(2, Math.ceil(distance(start, end) / 8));
+    let previous = inside(start);
+    for (let step = 1; step <= steps; step += 1) {
+      const t = step / steps;
+      const current = inside({ x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t });
+      if (current !== previous) crossings += 1;
+      previous = current;
+    }
+  }
+  return crossings;
+}
+
+/** How much of a segment runs along a segment that another route already occupies. */
+function sharedLength(start: Point, end: Point, taken: readonly [Point, Point][]): number {
+  const tolerance = 1.5;
+  const vertical = Math.abs(start.x - end.x) < tolerance;
+  let shared = 0;
+  for (const [otherStart, otherEnd] of taken) {
+    const otherVertical = Math.abs(otherStart.x - otherEnd.x) < tolerance;
+    if (otherVertical !== vertical) continue;
+    const axis = vertical ? "x" : "y";
+    if (Math.abs(start[axis] - otherStart[axis]) > tolerance) continue;
+    const along = vertical ? "y" : "x";
+    const overlap =
+      Math.min(Math.max(start[along], end[along]), Math.max(otherStart[along], otherEnd[along])) -
+      Math.max(Math.min(start[along], end[along]), Math.min(otherStart[along], otherEnd[along]));
+    if (overlap > shared) shared = overlap;
+  }
+  return Math.max(0, shared);
 }
 
 /** Place labels beside long segments; avoid nodes, other labels and group headings. */
 export function refineLabels(view: MeasuredView, geometry: GeometryView): GeometryView {
   const occupied: Rect[] = [...geometry.nodes, ...geometry.annotations, ...geometry.groups.map((g) => ({ ...g, height: view.groups.find((item) => item.id === g.id)?.titleHeight ?? 38 }))];
-  const edges = geometry.edges.map((edge) => {
-    if (!edge.label) return edge;
-    const label = edge.label;
-    const candidates: Rect[] = [label];
+
+  /**
+   * Where a label may sit: alongside its own route, offset far enough to clear whatever
+   * is next to it. Anchoring to the straight-line midpoint between endpoints leaves the
+   * label floating in open space whenever the route bends, so candidates come from the
+   * polyline itself and are scored against the polyline's midpoint.
+   */
+  const placements = (edge: GeometryEdge): { anchor: Point; candidates: Rect[] } => {
+    const label = edge.label!;
+    const anchor = midpointAlong(edge.points);
+    const candidates: Rect[] = [];
     for (let i = 1; i < edge.points.length; i++) {
       const a = edge.points[i - 1]!, b = edge.points[i]!;
-      for (const t of [0.5, 0.25, 0.75]) {
+      if (distance(a, b) < label.height + 8) continue;
+      for (const t of [0.5, 0.35, 0.65, 0.2, 0.8, 0.42, 0.58, 0.28, 0.72, 0.12, 0.88]) {
         const x = a.x + (b.x - a.x) * t, y = a.y + (b.y - a.y) * t;
-        if (a.y === b.y) for (const sign of [-1, 1]) candidates.push({ ...label, x: x - label.width / 2, y: sign < 0 ? y - label.height - 6 : y + 6 });
-        else for (const sign of [-1, 1]) candidates.push({ ...label, x: sign < 0 ? x - label.width - 6 : x + 6, y: y - label.height / 2 });
+        // Several clearances, so a crowded corridor does not force an overlap.
+        for (const clearance of [6, 20, 38, 60]) {
+          if (a.y === b.y) for (const sign of [-1, 1]) candidates.push({ ...label, x: x - label.width / 2, y: sign < 0 ? y - label.height - clearance : y + clearance });
+          else for (const sign of [-1, 1]) candidates.push({ ...label, x: sign < 0 ? x - label.width - clearance : x + clearance, y: y - label.height / 2 });
+        }
       }
     }
-    const cost = (r: Rect) => occupied.filter((o) => overlap(inflate(r, 3), o)).length * 1e8 + (r.x < 0 || r.y < 0 || r.x + r.width > geometry.bounds.width || r.y + r.height > geometry.bounds.height ? 1e7 : 0) + distance(r, label);
-    candidates.sort((a, b) => cost(a) - cost(b));
-    const chosen = candidates[0]!;
+    if (candidates.length === 0) candidates.push({ ...label, x: anchor.x - label.width / 2, y: anchor.y - label.height - 6 });
+    return { anchor, candidates };
+  };
+
+  const collides = (rect: Rect) => occupied.some((other) => overlap(inflate(rect, 3), other));
+  const outOfBounds = (rect: Rect) =>
+    rect.x < 0 || rect.y < 0 || rect.x + rect.width > geometry.bounds.width || rect.y + rect.height > geometry.bounds.height;
+
+  // Hardest first. Placing labels in edge order lets an easy label take the one free slot
+  // a constrained label needed, so order by how many free positions each one still has.
+  const pending = geometry.edges
+    .map((edge, index) => ({ edge, index, ...(edge.label ? placements(edge) : { anchor: { x: 0, y: 0 }, candidates: [] as Rect[] }) }))
+    .filter((entry) => entry.edge.label !== undefined);
+  const freedom = new Map(pending.map((entry) => [entry.edge.id, entry.candidates.filter((rect) => !collides(rect) && !outOfBounds(rect)).length]));
+  pending.sort((left, right) => (freedom.get(left.edge.id)! - freedom.get(right.edge.id)!) || left.index - right.index);
+
+  const chosenById = new Map<string, Rect>();
+  for (const { edge, anchor, candidates } of pending) {
+    const cost = (rect: Rect) =>
+      occupied.filter((other) => overlap(inflate(rect, 3), other)).length * 1e8 +
+      (outOfBounds(rect) ? 1e7 : 0) +
+      distance({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }, anchor);
+    const chosen = [...candidates].sort((left, right) => cost(left) - cost(right))[0]!;
     occupied.push(chosen);
-    return { ...edge, label: { ...label, ...chosen } };
+    chosenById.set(edge.id, chosen);
+  }
+
+  const edges = geometry.edges.map((edge) => {
+    const chosen = chosenById.get(edge.id);
+    return chosen && edge.label ? { ...edge, label: { ...edge.label, ...chosen } } : edge;
   });
   return { ...geometry, edges };
+}
+
+/**
+ * Place notes beside what they explain.
+ *
+ * An annotation's `anchor` names the component, boundary or relationship it describes.
+ * Positions are tried outward from that anchor and the first one that collides with
+ * nothing is taken; an unanchored note, or one with nowhere free to go, falls back to a
+ * row under the diagram. Without this a note is dropped in a corner and the reader has to
+ * guess what it refers to.
+ */
+export function placeAnnotations(
+  view: MeasuredView,
+  nodes: readonly GeometryNode[],
+  groups: readonly GeometryGroup[],
+  edges: readonly GeometryEdge[],
+  contentHeight: number,
+): GeometryAnnotation[] {
+  const anchors = new Map<string, Rect>();
+  for (const node of nodes) anchors.set(node.id, node);
+  for (const group of groups) anchors.set(group.id, group);
+  for (const edge of edges) {
+    if (edge.points.length < 2) continue;
+    const mid = midpointAlong(edge.points);
+    anchors.set(edge.id, { x: mid.x, y: mid.y, width: 1, height: 1 });
+  }
+  // Boundaries only block a note at their heading; their interior is fair game.
+  const occupied: Rect[] = [
+    ...nodes,
+    ...groups.map((group) => ({ ...group, height: view.groups.find((item) => item.id === group.id)?.titleHeight ?? 38 })),
+  ];
+
+  const placed: GeometryAnnotation[] = [];
+  let fallbackX = 24;
+  for (const annotation of view.annotations) {
+    const anchor = annotation.anchor === undefined ? undefined : anchors.get(annotation.anchor);
+    let chosen: Rect | undefined;
+    if (anchor) {
+      const gap = 20;
+      for (const distance of [gap, gap + 40, gap + 96, gap + 180]) {
+        const candidates: Rect[] = [
+          { x: anchor.x + anchor.width + distance, y: anchor.y, width: annotation.width, height: annotation.height },
+          { x: anchor.x - annotation.width - distance, y: anchor.y, width: annotation.width, height: annotation.height },
+          { x: anchor.x, y: anchor.y + anchor.height + distance, width: annotation.width, height: annotation.height },
+          { x: anchor.x, y: anchor.y - annotation.height - distance, width: annotation.width, height: annotation.height },
+          { x: anchor.x + anchor.width + distance, y: anchor.y + anchor.height + distance, width: annotation.width, height: annotation.height },
+        ];
+        chosen = candidates.find(
+          (candidate) =>
+            candidate.x >= 0 &&
+            candidate.y >= 0 &&
+            ![...occupied, ...placed].some((other) => overlap(inflate(candidate, 6), other)),
+        );
+        if (chosen) break;
+      }
+    }
+    if (!chosen) {
+      chosen = { x: fallbackX, y: contentHeight + 52, width: annotation.width, height: annotation.height };
+      fallbackX += annotation.width + 24;
+    }
+    placed.push({ id: annotation.id, x: round2(chosen.x), y: round2(chosen.y), width: chosen.width, height: chosen.height });
+  }
+  return placed;
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+/** The point halfway along a polyline by arc length, used to anchor that route's label. */
+function midpointAlong(points: readonly Point[]): Point {
+  if (points.length === 0) return { x: 0, y: 0 };
+  const first = points[0]!;
+  if (points.length === 1) return first;
+  let total = 0;
+  for (let i = 1; i < points.length; i++) total += distance(points[i - 1]!, points[i]!);
+  let travelled = 0;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!, b = points[i]!;
+    const length = distance(a, b);
+    if (travelled + length >= total / 2) {
+      const t = length === 0 ? 0 : (total / 2 - travelled) / length;
+      return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+    }
+    travelled += length;
+  }
+  return points[points.length - 1]!;
 }
 
 function simplify(points: readonly Point[]): Point[] {
@@ -223,15 +746,132 @@ function simplify(points: readonly Point[]): Point[] {
   return unique.filter((p, i) => i === 0 || i === unique.length - 1 || !((unique[i - 1]!.x === p.x && unique[i + 1]!.x === p.x) || (unique[i - 1]!.y === p.y && unique[i + 1]!.y === p.y)));
 }
 
+/**
+ * Pull apart routes that are drawn on top of each other.
+ *
+ * Whatever produced the routes — the graph backend or this engine — two connectors can end
+ * up sharing a long stretch of line, and the viewer then sees one relationship where the
+ * model has two. Each offending route is re-routed once with every other route's segments
+ * charged as occupied, and the new route is kept only when it genuinely shares less line
+ * and still touches no component it does not belong to.
+ */
+/**
+ * Shift interior segments that lie on top of each other apart.
+ *
+ * Rerouting cannot always help: when two connectors genuinely need the same corridor,
+ * the only free lattice line is the one they are both on. Moving one of them a few pixels
+ * sideways keeps both routes valid and makes two relationships visible as two lines. Only
+ * interior segments move, so neither route leaves its endpoints, and a shift is kept only
+ * when it hits nothing.
+ */
+function nudgeCoincidentSegments(view: MeasuredView, geometry: GeometryView): GeometryView {
+  const minimum = 12;
+  const step = 11;
+  const edges = geometry.edges.map((edge) => ({ ...edge, points: [...edge.points] }));
+
+  const blocked = (points: readonly Point[], obstacles: readonly Rect[]) =>
+    points.slice(1).some((point, index) => obstacles.some((rect) => segmentHitsRect(points[index]!, point, rect)));
+
+  // Obstacles depend only on the edge, so build them once rather than per pair.
+  const context = new Map<string, { obstacles: Rect[]; crossOnce: Rect[] }>();
+  for (const edge of edges) {
+    const semantic = view.edges.find((candidate) => candidate.id === edge.id);
+    const ends = [edge.points[0]!, edge.points[edge.points.length - 1]!];
+    context.set(edge.id, routingObstacles(view, geometry, semantic?.from, semantic?.to, ends, 6));
+  }
+
+  for (let left = 0; left < edges.length; left += 1) {
+    for (let right = left + 1; right < edges.length; right += 1) {
+      const first = edges[left]!;
+      const second = edges[right]!;
+      const firstSegments = first.points.slice(1).map((point, i) => [first.points[i]!, point] as [Point, Point]);
+      for (let index = 1; index < second.points.length - 1; index += 1) {
+        const start = second.points[index - 1]!;
+        const end = second.points[index]!;
+        // An end segment carries the arrow head, so it stays where the author's component is.
+        if (index === 1 && second.points.length <= 3) continue;
+        if (sharedLength(start, end, firstSegments) < minimum) continue;
+        const { obstacles, crossOnce } = context.get(second.id)!;
+        // Moving a segment must not push the route in or out of a boundary it already
+        // crosses correctly, so the crossing count may never get worse.
+        const boundaryCost = (points: readonly Point[]) =>
+          crossOnce.reduce((sum, rect) => sum + Math.abs(crossingCount(points, rect) - 1), 0);
+        const before = boundaryCost(second.points);
+        const vertical = Math.abs(start.x - end.x) < 1.5;
+        for (const delta of [step, -step, step * 2, -step * 2]) {
+          const moved = [...second.points];
+          moved[index - 1] = vertical ? { ...start, x: start.x + delta } : { ...start, y: start.y + delta };
+          moved[index] = vertical ? { ...end, x: end.x + delta } : { ...end, y: end.y + delta };
+          if (blocked(moved, obstacles)) continue;
+          if (sharedLength(moved[index - 1]!, moved[index]!, firstSegments) >= minimum) continue;
+          if (boundaryCost(moved) > before) continue;
+          second.points = moved;
+          break;
+        }
+      }
+    }
+  }
+  return { ...geometry, edges: edges.map((edge) => ({ ...edge, points: simplify(edge.points) })) };
+}
+
+function separateCoincidentRoutes(view: MeasuredView, geometry: GeometryView, passes?: number): GeometryView {
+  // Each pass reroutes offending connectors through the grid search, so a dense model
+  // gets fewer sweeps; the first pass does most of the work in every case.
+  const budget = passes ?? (geometry.edges.length > 45 ? 1 : geometry.edges.length > 24 ? 2 : 3);
+  // Moving one route frees the corridor another wanted, so repeat until nothing improves.
+  let current = geometry;
+  for (let pass = 0; pass < budget; pass += 1) {
+    const next = separateOnce(view, current);
+    if (next.edges.every((edge, index) => edge.points === current.edges[index]?.points)) return nudgeCoincidentSegments(view, next);
+    current = next;
+  }
+  return nudgeCoincidentSegments(view, current);
+}
+
+function separateOnce(view: MeasuredView, geometry: GeometryView): GeometryView {
+  const minimum = 12;
+  const segmentsOf = (edge: GeometryEdge): [Point, Point][] =>
+    edge.points.slice(1).map((point, index) => [edge.points[index]!, point] as [Point, Point]);
+  const sharedWith = (edge: GeometryEdge, others: readonly GeometryEdge[]): number => {
+    const taken = others.flatMap(segmentsOf);
+    return Math.max(0, ...segmentsOf(edge).map(([start, end]) => sharedLength(start, end, taken)));
+  };
+
+  const edges = [...geometry.edges];
+  // Shortest first: a long trunk keeps its corridor and the short connectors move aside.
+  const order = [...edges]
+    .map((edge, index) => ({ edge, index, length: segmentsOf(edge).reduce((sum, [start, end]) => sum + distance(start, end), 0) }))
+    .sort((left, right) => left.length - right.length || left.edge.id.localeCompare(right.edge.id, "en"));
+
+  for (const { index } of order) {
+    const edge = edges[index]!;
+    const others = edges.filter((_, position) => position !== index);
+    const before = sharedWith(edge, others);
+    if (before < minimum || edge.points.length < 2) continue;
+
+    const semantic = view.edges.find((candidate) => candidate.id === edge.id);
+    const start = edge.points[0]!;
+    const end = edge.points[edge.points.length - 1]!;
+    const { obstacles, endpoints, crossOnce } = routingObstacles(view, geometry, semantic?.from, semantic?.to, [start, end], 8);
+    const points = simplify([start, ...route(start, end, obstacles, others.flatMap(segmentsOf), crossOnce, endpoints), end]);
+    const candidate: GeometryEdge = { ...edge, points };
+    const hitsSomething = segmentsOf(candidate).some(([from, to]) => obstacles.some((rect) => segmentHitsRect(from, to, rect)));
+    if (hitsSomething) continue;
+    if (sharedWith(candidate, others) >= before) continue;
+    edges[index] = candidate;
+  }
+  return { ...geometry, edges };
+}
+
 function refineRoutes(view: MeasuredView, geometry: GeometryView): GeometryView {
   const edges = geometry.edges.map((edge) => {
     const semantic = view.edges.find((e) => e.id === edge.id);
-    const obstacles = [
-      ...geometry.nodes.map((node) => node.id === semantic?.from || node.id === semantic?.to ? node : inflate(node, 6)),
-      ...geometry.groups.map((group) => ({ ...group, height: view.groups.find((g) => g.id === group.id)?.titleHeight ?? 38 })),
-    ];
-    if (edge.points.length < 2 || !edge.points.slice(1).some((point, i) => obstacles.some((rect) => segmentHitsRect(edge.points[i]!, point, rect)))) return edge;
-    const points = obstacleRoute(edge.points[0]!, edge.points[edge.points.length - 1]!, obstacles);
+    if (edge.points.length < 2) return edge;
+    const start = edge.points[0]!;
+    const end = edge.points[edge.points.length - 1]!;
+    const { obstacles, endpoints } = routingObstacles(view, geometry, semantic?.from, semantic?.to, [start, end], 6);
+    if (!edge.points.slice(1).some((point, i) => obstacles.some((rect) => segmentHitsRect(edge.points[i]!, point, rect)))) return edge;
+    const points = obstacleRoute(start, end, obstacles, [], endpoints);
     return points ? { ...edge, points } : edge;
   });
   return { ...geometry, edges };

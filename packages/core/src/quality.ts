@@ -14,9 +14,12 @@ export interface QualityReport {
     readonly nodeOverlaps: number;
     readonly edgeNodeIntersections: number;
     readonly endpointBodyCrossings: number;
+    readonly coincidentEdgeSegments: number;
     readonly edgeCrossings: number;
     readonly nonOrthogonalSegments: number;
     readonly emptyRoutes: number;
+    readonly droppedRelationships: number;
+    readonly droppedComponents: number;
     readonly illegalBoundaryCrossings: number;
     readonly labelOverlaps: number;
     readonly annotationOverlaps: number;
@@ -59,6 +62,21 @@ export function analyzeGeometry(view: MeasuredView, geometry: GeometryView): Qua
     if (nodeRect !== undefined && groupRect !== undefined && !contains(groupRect, nodeRect, 0.01)) {
       diagnostics.push(error("TOP411_NODE_OUTSIDE_GROUP", `Node ${JSON.stringify(node.id)} is outside group ${JSON.stringify(node.group)}.`));
     }
+  }
+
+  // Nothing the author declared may silently vanish. A layout backend that drops a
+  // relationship or a component still produces clean-looking geometry, so without this
+  // check the rest of the quality model happily reports a defect-free diagram of the
+  // wrong architecture.
+  const routedIds = new Set(geometry.edges.map((edge) => edge.id));
+  const placedIds = new Set(geometry.nodes.map((node) => node.id));
+  const droppedEdges = view.edges.filter((edge) => !routedIds.has(edge.id));
+  const droppedNodes = view.nodes.filter((node) => !placedIds.has(node.id));
+  for (const edge of droppedEdges) {
+    diagnostics.push(error("TOP412_RELATIONSHIP_DROPPED", `Edge ${JSON.stringify(edge.id)} (${edge.from} → ${edge.to}) produced no route and is missing from the diagram.`));
+  }
+  for (const node of droppedNodes) {
+    diagnostics.push(error("TOP413_COMPONENT_DROPPED", `Node ${JSON.stringify(node.id)} was not placed and is missing from the diagram.`));
   }
 
   for (const edgeGeometry of geometry.edges) {
@@ -139,21 +157,67 @@ export function analyzeGeometry(view: MeasuredView, geometry: GeometryView): Qua
   }
 
   const edgeCrossings = countEdgeCrossings(geometry.edges);
+  const coincident = findCoincidentSegments(geometry.edges);
+  for (const pair of coincident) {
+    diagnostics.push({
+      code: "TOP425_EDGE_SEGMENTS_COINCIDENT",
+      severity: "warning",
+      message: `Edges ${JSON.stringify(pair.left)} and ${JSON.stringify(pair.right)} are drawn on top of each other for ${Math.round(pair.overlap)}px, so two relationships read as one line.`,
+    });
+  }
   return {
     diagnostics,
     metrics: {
       nodeOverlaps,
       edgeNodeIntersections,
       endpointBodyCrossings,
+      coincidentEdgeSegments: coincident.length,
       edgeCrossings,
       nonOrthogonalSegments,
       emptyRoutes,
+      droppedRelationships: droppedEdges.length,
+      droppedComponents: droppedNodes.length,
       illegalBoundaryCrossings,
       labelOverlaps,
       annotationOverlaps,
       groupTitleIntersections,
     },
   };
+}
+
+/**
+ * Segments from different edges that lie on the same line and overlap. The viewer sees
+ * one connector where the model has two, which no crossing count can reveal.
+ */
+function findCoincidentSegments(edges: readonly GeometryEdge[]): { left: string; right: string; overlap: number }[] {
+  const tolerance = 1.5;
+  const minimum = 12;
+  const found: { left: string; right: string; overlap: number }[] = [];
+  for (let leftIndex = 0; leftIndex < edges.length; leftIndex += 1) {
+    const left = edges[leftIndex];
+    if (left === undefined) continue;
+    for (let rightIndex = leftIndex + 1; rightIndex < edges.length; rightIndex += 1) {
+      const right = edges[rightIndex];
+      if (right === undefined) continue;
+      let worst = 0;
+      for (const [leftStart, leftEnd] of segments(left)) {
+        for (const [rightStart, rightEnd] of segments(right)) {
+          const leftVertical = Math.abs(leftStart.x - leftEnd.x) < tolerance;
+          const rightVertical = Math.abs(rightStart.x - rightEnd.x) < tolerance;
+          if (leftVertical !== rightVertical) continue;
+          const axis = leftVertical ? "x" : "y";
+          if (Math.abs(leftStart[axis] - rightStart[axis]) > tolerance) continue;
+          const along = leftVertical ? "y" : "x";
+          const overlap =
+            Math.min(Math.max(leftStart[along], leftEnd[along]), Math.max(rightStart[along], rightEnd[along])) -
+            Math.max(Math.min(leftStart[along], leftEnd[along]), Math.min(rightStart[along], rightEnd[along]));
+          if (overlap > worst) worst = overlap;
+        }
+      }
+      if (worst >= minimum) found.push({ left: left.id, right: right.id, overlap: worst });
+    }
+  }
+  return found;
 }
 
 function belongsToGroup(

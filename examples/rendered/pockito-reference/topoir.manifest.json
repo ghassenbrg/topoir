@@ -6,7 +6,7 @@
   },
   "input": {
     "source": "/Users/ghassenbrg/git/topoir/examples/pockito-reference.topoir.yaml",
-    "sha256": "aab778018f3a9c2e23002821bc990fafe3c52e2d1665102caa7423d5ec06afbf"
+    "sha256": "1f8153022aaf6535bbc35ff9c6537a72687a32c7a42e32bd5d2a6cb508caa57b"
   },
   "document": {
     "name": "pockito-reference",
@@ -21,18 +21,18 @@
       "format": "svg",
       "fileName": "deployment.svg",
       "mediaType": "image/svg+xml",
-      "sha256": "b164dcd7a4f2b88bb43d9e89b41c4b455c413426dc4247bad0c453b45e63ff51",
-      "width": 2435.55,
-      "height": 968.2
+      "sha256": "f85ab2bf9543542bea39b2d83751cf4f2002d4368d9796ef4528d9d51b7f7ea5",
+      "width": 1444.1,
+      "height": 1069.2
     },
     {
       "viewId": "deployment",
       "format": "png",
       "fileName": "deployment.png",
       "mediaType": "image/png",
-      "sha256": "784504fbd56b4d5027aa64e7a4d5e35b83bc4461895a31c52d26a92d4dcd68e1",
-      "width": 2435.55,
-      "height": 968.2
+      "sha256": "1e408d55239309dbfc8b5e79753101bdda603f2e0e29a66dc79eee39fbf25cbf",
+      "width": 1444.1,
+      "height": 1069.2
     }
   ]
 }

@@ -20,7 +20,8 @@ import ElkModule, {
 } from "elkjs/lib/elk.bundled.js";
 
 const ElkConstructor = ElkModule as unknown as new () => ElkApi;
-export { CompositionEngine, compositionScore, refineLabels } from "./composition.js";
+export { CompositionEngine, compositionScore, refineLabels, routeEdges } from "./composition.js";
+export { banded, type BandedSpacing } from "./banded.js";
 
 const ROOT_ID = "__topoir_root__";
 const ANNOTATION_PREFIX = "__topoir_annotation__";
@@ -81,14 +82,6 @@ export function toElkGraph(view: MeasuredView, seed = 1): ElkNode {
     height: annotation.height,
     layoutOptions: { "elk.nodeSize.constraints": "FIXED_SIZE" },
   }));
-  const children: ElkNode[] = [
-    ...(groupByParent.get(undefined) ?? []).map((group) =>
-      groupToElk(group, groupByParent, nodesByGroup),
-    ),
-    ...(nodesByGroup.get(undefined) ?? []).map(nodeToElk),
-    ...annotations,
-  ];
-
   const edges: ElkExtendedEdge[] = view.edges.map((edge) => {
     const storyIndex = view.design?.story?.indexOf(edge.id) ?? -1;
     const label: ElkLabel[] =
@@ -124,11 +117,69 @@ export function toElkGraph(view: MeasuredView, seed = 1): ElkNode {
     });
   }
 
+  // ELK requires a hierarchy-crossing edge to be declared on the lowest common ancestor of
+  // its endpoints. Declaring every edge on the root throws UnsupportedGraphException as
+  // soon as the endpoints sit at different depths, which is most real nested models.
+  const parentOfNode = new Map(view.nodes.map((node) => [node.id, node.group]));
+  const parentOfGroup = new Map(view.groups.map((group) => [group.id, group.parent]));
+  const ancestry = (nodeId: string): (string | undefined)[] => {
+    const chain: (string | undefined)[] = [];
+    let current = parentOfNode.get(nodeId);
+    while (current !== undefined) {
+      chain.unshift(current);
+      current = parentOfGroup.get(current);
+    }
+    chain.unshift(undefined);
+    return chain;
+  };
+  const containerOf = (edge: ElkExtendedEdge): string | undefined => {
+    const source = edge.sources[0]?.startsWith(PORT_PREFIX)
+      ? edge.sources[0].slice(PORT_PREFIX.length).split(":")[0]!
+      : edge.sources[0]!;
+    const target = edge.targets[0]?.startsWith(PORT_PREFIX)
+      ? edge.targets[0].slice(PORT_PREFIX.length).split(":")[0]!
+      : edge.targets[0]!;
+    // Annotations are laid out at the root, so anything touching one stays at the root.
+    if (!parentOfNode.has(source) || !parentOfNode.has(target)) return undefined;
+    const left = ancestry(source);
+    const right = ancestry(target);
+    let common: string | undefined;
+    for (let index = 0; index < Math.min(left.length, right.length); index += 1) {
+      if (left[index] !== right[index]) break;
+      common = left[index];
+    }
+    return common;
+  };
+  const edgesByContainer = new Map<string | undefined, ElkExtendedEdge[]>();
+  for (const edge of edges) {
+    const container = containerOf(edge);
+    edgesByContainer.set(container, [...(edgesByContainer.get(container) ?? []), edge]);
+  }
+
+  // A boundary is packable only when no relationship touches anything inside it.
+  const connected = new Set(view.edges.flatMap((edge) => [edge.from, edge.to]));
+  const packable = new Set<string>();
+  for (const group of view.groups) {
+    const descendants = (id: string): string[] => [
+      ...(nodesByGroup.get(id) ?? []).map((node) => node.id),
+      ...(groupByParent.get(id) ?? []).flatMap((child) => descendants(child.id)),
+    ];
+    if (!descendants(group.id).some((id) => connected.has(id))) packable.add(group.id);
+  }
+
+  const children: ElkNode[] = [
+    ...(groupByParent.get(undefined) ?? []).map((group) =>
+      groupToElk(group, groupByParent, nodesByGroup, edgesByContainer, packable),
+    ),
+    ...(nodesByGroup.get(undefined) ?? []).map(nodeToElk),
+    ...annotations,
+  ];
+
   const spacing = spacingFor(view.layout.spacing);
   return {
     id: ROOT_ID,
     children,
-    edges,
+    edges: edgesByContainer.get(undefined) ?? [],
     layoutOptions: {
       "elk.algorithm": "layered",
       "elk.direction": directionFor(view.layout.direction),
@@ -155,9 +206,14 @@ function groupToElk(
   group: MeasuredGroup,
   groupsByParent: ReadonlyMap<string | undefined, readonly MeasuredGroup[]>,
   nodesByGroup: ReadonlyMap<string | undefined, readonly MeasuredNode[]>,
+  edgesByContainer: ReadonlyMap<string | undefined, readonly ElkExtendedEdge[]>,
+  packable: ReadonlySet<string>,
 ): ElkNode {
   const mode = group.layout.mode;
-  const algorithm = mode === "grid" || mode === "pack" ? "box" : "layered";
+  // The box packer cannot lay out edges, and a packed boundary anywhere in the chain
+  // stops the layered pass reaching the boundaries below it. So a boundary may only be
+  // packed when nothing inside it is connected to anything.
+  const algorithm = (mode === "grid" || mode === "pack") && packable.has(group.id) ? "box" : "layered";
   const direction =
     mode === "column"
       ? "DOWN"
@@ -166,17 +222,24 @@ function groupToElk(
         : directionFor(group.layout.direction);
   const children = [
     ...(groupsByParent.get(group.id) ?? []).map((child) =>
-      groupToElk(child, groupsByParent, nodesByGroup),
+      groupToElk(child, groupsByParent, nodesByGroup, edgesByContainer, packable),
     ),
     ...(nodesByGroup.get(group.id) ?? []).map(nodeToElk),
   ];
   const gridColumns = group.layout.columns ?? Math.max(1, Math.ceil(Math.sqrt(children.length)));
   const gridRows = Math.max(1, Math.ceil(children.length / gridColumns));
+  const ownEdges = edgesByContainer.get(group.id) ?? [];
   return {
     id: group.id,
     children,
+    ...(ownEdges.length ? { edges: [...ownEdges] } : {}),
     layoutOptions: {
-      "elk.algorithm": algorithm,
+      // A container that has to route its own relationships cannot use the box packer,
+      // which does not lay out edges at all.
+      "elk.algorithm": ownEdges.length ? "layered" : algorithm,
+      // Hierarchy handling is not inherited: without it on every level, a relationship
+      // that crosses into a nested boundary is rejected as an unsupported graph.
+      ...(algorithm === "layered" ? { "elk.hierarchyHandling": "INCLUDE_CHILDREN" } : {}),
       "elk.direction": direction,
       "elk.edgeRouting": "ORTHOGONAL",
       "elk.padding": `[top=${group.padding.top},left=${group.padding.left},bottom=${group.padding.bottom},right=${group.padding.right}]`,
@@ -273,7 +336,16 @@ function fromElkGraph(view: MeasuredView, graph: ElkNode) {
   };
   walk(graph, { x: 0, y: 0 });
 
-  const edges: GeometryEdge[] = (graph.edges ?? [])
+  // Relationships are declared on the lowest common ancestor of their endpoints, so they
+  // must be collected from every container, not only the root.
+  const allEdges: ElkExtendedEdge[] = [];
+  const collectEdges = (node: ElkNode): void => {
+    for (const edge of (node.edges ?? []) as ElkExtendedEdge[]) allEdges.push(edge);
+    for (const child of node.children ?? []) collectEdges(child);
+  };
+  collectEdges(graph);
+
+  const edges: GeometryEdge[] = allEdges
     .filter((edge) => !edge.id.startsWith(ANCHOR_EDGE_PREFIX))
     .map((edge) => {
       const edgeOffset = offsets.get(edge.container ?? ROOT_ID) ?? { x: 0, y: 0 };

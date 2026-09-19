@@ -16,12 +16,13 @@
     "check": "pnpm build && pnpm typecheck && pnpm test",
     "benchmark": "tsx benchmarks/compile.mts",
     "benchmark:references": "tsx benchmarks/reference-quality.mts",
-    "topoir": "node packages/cli/dist/bin.js"
+    "topoir": "node packages/cli/dist/bin.js",
+    "benchmark:generalization": "tsx benchmarks/generalization.mts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "tsx": "^4.20.0",
     "tsup": "^8.5.0",
+    "tsx": "^4.20.0",
     "typescript": "^6.0.0",
     "vitest": "^3.2.0"
   }

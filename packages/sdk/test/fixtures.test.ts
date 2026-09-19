@@ -40,6 +40,20 @@ describe("topology regression matrix", () => {
         `${file}: ${result.diagnostics.map((item) => `${item.code} ${item.message}`).join("; ")}`,
       ).toEqual([]);
       expect(result.artifacts).toHaveLength(1);
+      // No published example may hide a relationship behind another connector or clip a label.
+      for (const view of result.views) {
+        expect(view.metrics, `${file} [${view.id}]`).toMatchObject({
+          nodeOverlaps: 0,
+          edgeNodeIntersections: 0,
+          endpointBodyCrossings: 0,
+          nonOrthogonalSegments: 0,
+          emptyRoutes: 0,
+          labelOverlaps: 0,
+          annotationOverlaps: 0,
+          groupTitleIntersections: 0,
+          coincidentEdgeSegments: 0,
+        });
+      }
     }
   });
 

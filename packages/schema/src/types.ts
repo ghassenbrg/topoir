@@ -130,10 +130,81 @@ export interface GroupLayout {
   readonly [extension: `x-${string}`]: unknown;
 }
 
+export interface PaintOverride {
+  readonly fill?: string;
+  readonly stroke?: string;
+  readonly text?: string;
+}
+
+export interface GroupVisual extends PaintOverride {
+  readonly emphasis?: "primary" | "secondary" | "muted";
+}
+
+/**
+ * The design tokens a view may author. Every field overrides the named base in `extends`,
+ * so an author states only what makes this diagram's design its own.
+ */
+export interface DesignTokens {
+  readonly extends?: string;
+  readonly language?: {
+    readonly component?: "card" | "icon" | "architectural" | "sketch";
+    readonly header?: "plain" | "editorial" | "rule";
+    readonly boundaries?: "panel" | "outline" | "rail";
+    readonly connectorRadius?: number;
+    readonly depth?: number;
+    readonly iconSize?: number;
+  };
+  readonly font?: {
+    readonly family?: string;
+    readonly labelSize?: number;
+    readonly descriptionSize?: number;
+    readonly groupTitleSize?: number;
+    readonly edgeLabelSize?: number;
+    readonly lineHeight?: number;
+  };
+  readonly canvas?: { readonly background?: string; readonly foreground?: string; readonly muted?: string };
+  readonly spacing?: {
+    readonly nodePaddingX?: number;
+    readonly nodePaddingY?: number;
+    readonly groupPadding?: number;
+    readonly groupTitleHeight?: number;
+    readonly layerGap?: number;
+    readonly nodeGap?: number;
+  };
+  readonly node?: {
+    readonly minWidth?: number;
+    readonly minHeight?: number;
+    readonly maxTextWidth?: number;
+    readonly radius?: number;
+    readonly iconSize?: number;
+    readonly default?: PaintOverride;
+    readonly byKind?: Readonly<Record<string, PaintOverride>>;
+  };
+  readonly group?: {
+    readonly radius?: number;
+    readonly default?: PaintOverride;
+    readonly byKind?: Readonly<Record<string, PaintOverride>>;
+  };
+  readonly edge?: {
+    readonly stroke?: string;
+    readonly labelBackground?: string;
+    readonly labelText?: string;
+    readonly width?: number;
+    readonly byKind?: Readonly<Record<string, string>>;
+    readonly palette?: readonly string[];
+  };
+  readonly annotation?: {
+    readonly note?: PaintOverride;
+    readonly warning?: PaintOverride;
+    readonly callout?: PaintOverride;
+  };
+}
+
 export interface GroupDefinition {
   readonly id: string;
   readonly label?: string;
   readonly kind: GroupKind;
+  readonly visual?: GroupVisual;
   readonly parent?: string;
   readonly description?: string;
   readonly technology?: string;
@@ -204,6 +275,7 @@ export interface AnnotationDefinition {
   readonly id: string;
   readonly kind?: "note" | "warning" | "callout";
   readonly text: string;
+  readonly visual?: PaintOverride;
   readonly anchor?: string;
   readonly tags?: readonly string[];
   readonly order?: number;
@@ -242,7 +314,7 @@ export interface ViewDefinition {
   readonly include?: ViewSelector;
   readonly exclude?: ViewSelector;
   readonly layout?: ViewLayout;
-  readonly theme?: string;
+  readonly theme?: string | DesignTokens;
   readonly showLegend?: boolean;
   readonly design?: DesignIntent;
   readonly [extension: `x-${string}`]: unknown;
@@ -260,7 +332,7 @@ export interface NodeVisual {
 }
 
 export interface DesignIntent {
-  readonly composition?: "topology" | "layers" | "sequence" | "swimlanes" | "comparison" | "architecture-map";
+  readonly composition?: "topology" | "layers" | "sequence" | "swimlanes" | "comparison" | "architecture" | "architecture-map";
   readonly audience?: "engineering" | "executive" | "presentation";
   readonly takeaway?: string;
   readonly focus?: readonly string[];

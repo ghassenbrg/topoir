@@ -49,7 +49,8 @@
     ],
     "gaps": [
       "The fixture preserves the four unequal zones, state below compute, external branches, the gateway route table and the anchored note.",
-      "The primary request path is semantically complete but not yet visually dominant: it doubles back between the edge, the load balancer and the application core instead of reading as one monotonic spine. A hard mixed-orientation spine constraint remains outstanding.",
+      "Lane distribution now separates connectors that share a component side, which removed all five hidden relationships this case previously had, at the cost of more visible crossings (13). That trade is deliberate: a connector drawn under another is not visible at all.",
+      "The primary request path is semantically complete but not yet visually dominant: it doubles back between the edge, the load balancer and the application core instead of reading as one monotonic spine.",
       "Whitespace is unbalanced \u2014 the external-locations zone and the lower-left quadrant are nearly empty at reference density."
     ]
   },
@@ -57,7 +58,7 @@
     "id": "ref-04-pockito",
     "reference": "exple4.png",
     "source": "examples/pockito-reference.topoir.yaml",
-    "coverage": "structural-reconstruction",
+    "coverage": "full-reconstruction \u2014 reviewed, awaiting user confirmation",
     "required": [
       "three client entry points",
       "gateway with three internal routes",
@@ -67,10 +68,10 @@
       "multiple identifying assets per component"
     ],
     "gaps": [
-      "The gateway's three routes are now measured internal compartments and each connector attaches to the compartment that owns it; workloads carry a platform marker plus a role asset.",
-      "Composition is still weaker than the reference: the identity service lands above the request band instead of below it, so the quiet identity path runs the full canvas width, and two application-routing connectors cross because layer-internal placement does not yet follow the declared route order.",
-      "Aspect ratio is wider than the reference and the lower cluster band is largely empty; client fan-in is three parallel connectors rather than a merged bus.",
-      "Vendor logos for the gateway, AI workflow and identity components are clearly identified generic symbols, not provider artwork."
+      "Full entity, relationship and boundary inventory; the gateway's three routes are measured internal compartments and each connector attaches to the compartment that owns it; workloads carry a platform marker plus a role asset and a replica summary.",
+      "Measured quality is clean: zero node overlaps, edge/node intersections, endpoint crossings, non-orthogonal segments, empty routes, boundary violations, label overlaps, heading intersections, coincident connectors and edge crossings.",
+      "Agent review scored all seven rubric dimensions at 3 or better (semantic completeness 4, composition 3, flow and routing 4, typography 3, assets 3, story 4, finish 3). A maintainer record and the user's confirmation of the overall visual bar are the remaining gate.",
+      "Known differences from the reference: the canvas is squarer (1.63 against 2.35) because the platform services form one tall band where the reference uses two columns plus a lower identity band; vendor logos for the gateway, AI workflow and identity components are clearly identified generic symbols rather than provider artwork."
     ]
   },
   {
@@ -105,7 +106,8 @@
       "legally sourced provider artwork"
     ],
     "gaps": [
-      "The fixture includes nested VPCs, global services, transit and five regional replication paths, each now laid out as its own row so every replication connector runs straight between the corresponding pair.",
+      "The fixture includes nested VPCs, global services, transit and five regional replication paths, each laid out as its own row so every replication connector runs straight between the corresponding pair.",
+      "Crossings fell from six to three and no connector is hidden behind another.",
       "The composition is portrait where the reference is landscape, and correspondence is achieved by stacking matching rows rather than by a general mirrored-region solver.",
       "Provider-native AWS artwork is intentionally replaced with clearly identified generic symbols until redistribution terms are handled as an external pack."
     ]

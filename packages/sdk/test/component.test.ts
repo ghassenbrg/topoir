@@ -206,3 +206,149 @@ describe("reference fixture", () => {
     });
   });
 });
+
+describe("banded architecture composition", () => {
+  const document = (extra: Record<string, unknown> = {}) => ({
+    apiVersion: "topoir.dev/v1alpha1",
+    kind: "Architecture",
+    metadata: { name: "banded" },
+    model: {
+      groups: [
+        { id: "edge", kind: "external-zone", label: "Edge", layout: { mode: "column" } },
+        { id: "core", kind: "kubernetes-cluster", label: "Core" },
+        { id: "stores", kind: "logical", label: "Stores", parent: "core", order: 9, layout: { mode: "column" } },
+      ],
+      nodes: [
+        { id: "client-a", kind: "client", group: "edge", order: 0 },
+        { id: "client-b", kind: "client", group: "edge", order: 1 },
+        { id: "gateway", kind: "gateway", group: "core", order: 0, ports: [{ id: "one", label: "/one/*", side: "east", order: 0 }, { id: "two", label: "/two/*", side: "east", order: 1 }], visual: { portLabels: "inside" } },
+        { id: "svc-one", kind: "service", group: "core", order: 1 },
+        { id: "svc-two", kind: "service", group: "core", order: 2 },
+        { id: "cache", kind: "cache", group: "stores", order: 0 },
+        { id: "db", kind: "database", group: "stores", order: 1 },
+      ],
+      edges: [
+        { id: "a-gw", from: "client-a", to: "gateway" },
+        { id: "b-gw", from: "client-b", to: "gateway" },
+        { id: "gw-one", from: "gateway", to: "svc-one", sourcePort: "one" },
+        { id: "gw-two", from: "gateway", to: "svc-two", sourcePort: "two" },
+        { id: "one-cache", from: "svc-one", to: "cache" },
+        { id: "one-db", from: "svc-one", to: "db" },
+        { id: "two-db", from: "svc-two", to: "db" },
+      ],
+      ...extra,
+    },
+    views: [{ id: "overview", layout: { direction: "right" }, design: { composition: "architecture" } }],
+  });
+
+  it("places boundaries as contiguous blocks and honours declared sibling rank", async () => {
+    const result = await new TopoIRCompiler().compile(JSON.stringify(document()));
+    expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+    const view = result.views[0]!;
+    const nodes = new Map(view.geometry.nodes.map((node) => [node.id, node]));
+    const groups = new Map(view.geometry.groups.map((group) => [group.id, group]));
+
+    // Layers advance along the view direction.
+    expect(nodes.get("gateway")!.x).toBeGreaterThan(groups.get("edge")!.x);
+    expect(nodes.get("svc-one")!.x).toBeGreaterThan(nodes.get("gateway")!.x);
+    expect(groups.get("stores")!.x).toBeGreaterThan(nodes.get("svc-one")!.x);
+
+    // Declared rank is the drawn order across the layer.
+    expect(nodes.get("client-a")!.y).toBeLessThan(nodes.get("client-b")!.y);
+    expect(nodes.get("svc-one")!.y).toBeLessThan(nodes.get("svc-two")!.y);
+    expect(nodes.get("cache")!.y).toBeLessThan(nodes.get("db")!.y);
+
+    // Every boundary fully contains its own members and nothing else.
+    for (const [child, parent] of [["client-a", "edge"], ["client-b", "edge"], ["cache", "stores"], ["db", "stores"], ["gateway", "core"]] as const) {
+      const node = nodes.get(child)!;
+      const box = groups.get(parent)!;
+      expect(node.x, `${child} in ${parent}`).toBeGreaterThanOrEqual(box.x);
+      expect(node.y, `${child} in ${parent}`).toBeGreaterThanOrEqual(box.y);
+      expect(node.x + node.width).toBeLessThanOrEqual(box.x + box.width);
+      expect(node.y + node.height).toBeLessThanOrEqual(box.y + box.height);
+    }
+    expect(groups.get("stores")!.parent).toBe("core");
+
+    expect(view.metrics).toMatchObject({
+      nodeOverlaps: 0,
+      edgeNodeIntersections: 0,
+      endpointBodyCrossings: 0,
+      nonOrthogonalSegments: 0,
+      emptyRoutes: 0,
+      labelOverlaps: 0,
+      groupTitleIntersections: 0,
+      coincidentEdgeSegments: 0,
+    });
+  });
+
+  it("attaches gateway connectors to their own compartments in the banded family", async () => {
+    const result = await new TopoIRCompiler().compile(JSON.stringify(document()));
+    const view = result.views[0]!;
+    const measured = view.measured.nodes.find((node) => node.id === "gateway")!;
+    const geometry = view.geometry.nodes.find((node) => node.id === "gateway")!;
+    for (const [routeId, edgeId] of [["one", "gw-one"], ["two", "gw-two"]] as const) {
+      const slot = measured.ports.find((port) => port.id === routeId)!.slot!;
+      const port = geometry.ports.find((candidate) => candidate.id === routeId)!;
+      expect(port.y).toBeCloseTo(geometry.y + slot.y + slot.height / 2, 1);
+      expect(view.geometry.edges.find((edge) => edge.id === edgeId)!.points[0]!.y).toBeCloseTo(port.y, 1);
+    }
+  });
+
+  it("is deterministic and survives a perturbed label and an extra relationship", async () => {
+    const first = await new TopoIRCompiler().compile(JSON.stringify(document()));
+    const second = await new TopoIRCompiler().compile(JSON.stringify(document()));
+    expect(first.artifacts[0]?.sha256).toBe(second.artifacts[0]?.sha256);
+
+    const perturbed = document();
+    perturbed.model.nodes[3]!.label = "A considerably longer service label than before";
+    perturbed.model.edges.push({ id: "two-cache", from: "svc-two", to: "cache" });
+    const changed = await new TopoIRCompiler().compile(JSON.stringify(perturbed));
+    expect(changed.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+    expect(changed.views[0]?.metrics).toMatchObject({
+      nodeOverlaps: 0,
+      edgeNodeIntersections: 0,
+      endpointBodyCrossings: 0,
+      nonOrthogonalSegments: 0,
+      emptyRoutes: 0,
+      labelOverlaps: 0,
+    });
+    expect(changed.views[0]?.geometry.edges.some((edge) => edge.id === "two-cache")).toBe(true);
+  });
+
+  it("does not leave two relationships drawn as one line", async () => {
+    // Three connectors converge on one component from different distances.
+    const fanIn = {
+      apiVersion: "topoir.dev/v1alpha1",
+      kind: "Architecture",
+      metadata: { name: "fan-in" },
+      model: {
+        nodes: [
+          { id: "far", kind: "gateway", order: 0 },
+          { id: "mid", kind: "service", order: 1 },
+          { id: "near", kind: "service", order: 2 },
+          { id: "idp", kind: "identity-provider", order: 3 },
+        ],
+        edges: [
+          { id: "far-idp", from: "far", to: "idp", kind: "authenticate" },
+          { id: "mid-idp", from: "mid", to: "idp", kind: "authenticate" },
+          { id: "near-idp", from: "near", to: "idp", kind: "authorize" },
+          { id: "far-mid", from: "far", to: "mid" },
+          { id: "mid-near", from: "mid", to: "near" },
+        ],
+      },
+      views: [{ id: "overview", layout: { direction: "right" }, design: { composition: "architecture" } }],
+    };
+    const result = await new TopoIRCompiler().compile(JSON.stringify(fanIn));
+    expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+    expect(result.views[0]?.metrics["coincidentEdgeSegments"]).toBe(0);
+    // Each connector approaches the identity provider along its own corridor, so all three
+    // relationships remain separately traceable even where they share an arrival point.
+    const approaches = result.views[0]!.geometry.edges
+      .filter((edge) => edge.id.endsWith("-idp"))
+      .map((edge) => {
+        const penultimate = edge.points[edge.points.length - 2]!;
+        return `${Math.round(penultimate.x)},${Math.round(penultimate.y)}`;
+      });
+    expect(new Set(approaches).size).toBe(3);
+  });
+});

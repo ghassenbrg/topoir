@@ -1,4 +1,4 @@
-import type { EdgeKind, GroupKind, NodeKind, NodeVisual } from "@topoir/schema";
+import type { DesignTokens, EdgeKind, GroupKind, NodeKind, NodeVisual } from "@topoir/schema";
 
 export interface PaintStyle {
   readonly fill: string;
@@ -199,10 +199,73 @@ const minimal: TopoIRTheme = {
 };
 export const themes: readonly TopoIRTheme[] = [technicalCleanTheme, cloud, executive, dark, blueprint, sketch, minimal];
 
-export function resolveTheme(id: string): TopoIRTheme {
+export function resolveTheme(theme: string | DesignTokens | undefined): TopoIRTheme {
+  if (theme === undefined) return technicalCleanTheme;
+  if (typeof theme === "string") return namedTheme(theme);
+  // Authored tokens layer over a named base, so an author states only what makes this
+  // diagram's design its own and never has to restate a whole design system.
+  const base = namedTheme(theme.extends ?? technicalCleanTheme.id);
+  return {
+    ...base,
+    id: `${base.id}+authored`,
+    ...(base.language || theme.language ? { language: { ...(base.language ?? defaultLanguage), ...strip(theme.language) } } : {}),
+    font: { ...base.font, ...strip(theme.font) },
+    canvas: { ...base.canvas, ...strip(theme.canvas) },
+    spacing: { ...base.spacing, ...strip(theme.spacing) },
+    node: {
+      ...base.node,
+      ...strip(theme.node, ["default", "byKind"]),
+      default: { ...base.node.default, ...strip(theme.node?.default) },
+      byKind: mergePaints(base.node.byKind, theme.node?.byKind, base.node.default),
+    },
+    group: {
+      ...base.group,
+      ...strip(theme.group, ["default", "byKind"]),
+      default: { ...base.group.default, ...strip(theme.group?.default) },
+      byKind: mergePaints(base.group.byKind, theme.group?.byKind, base.group.default),
+    },
+    edge: {
+      ...base.edge,
+      ...strip(theme.edge, ["byKind", "palette"]),
+      byKind: { ...base.edge.byKind, ...strip(theme.edge?.byKind) },
+      palette: theme.edge?.palette?.length ? [...theme.edge.palette] : base.edge.palette,
+    },
+    annotation: {
+      note: { ...base.annotation.note, ...strip(theme.annotation?.note) },
+      warning: { ...base.annotation.warning, ...strip(theme.annotation?.warning) },
+      callout: { ...base.annotation.callout, ...strip(theme.annotation?.callout) },
+    },
+  };
+}
+
+export function namedTheme(id: string): TopoIRTheme {
   const theme = themes.find((item) => item.id === id);
   if (!theme) throw new Error(`Unknown theme ${JSON.stringify(id)}. Available themes: ${themes.map((item) => item.id).join(", ")}.`);
   return theme;
+}
+
+const defaultLanguage = { component: "card", header: "plain", boundaries: "panel", connectorRadius: 8, depth: 0, iconSize: 28 } as const;
+
+/** Drop absent keys so an override never erases a base value with `undefined`. */
+function strip<T extends object>(value: T | undefined, omit: readonly string[] = []): Partial<T> {
+  if (!value) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter(([key, entry]) => entry !== undefined && !omit.includes(key)),
+  ) as Partial<T>;
+}
+
+/** An authored paint may state only one channel; the rest comes from the base entry. */
+function mergePaints<K extends string>(
+  base: Readonly<Partial<Record<K, PaintStyle>>>,
+  authored: Readonly<Record<string, Partial<PaintStyle>>> | undefined,
+  fallback: PaintStyle,
+): Readonly<Partial<Record<K, PaintStyle>>> {
+  if (!authored) return base;
+  const merged: Record<string, PaintStyle> = { ...(base as Record<string, PaintStyle>) };
+  for (const [kind, paint] of Object.entries(authored)) {
+    merged[kind] = { ...(merged[kind] ?? fallback), ...strip(paint) };
+  }
+  return merged as Readonly<Partial<Record<K, PaintStyle>>>;
 }
 
 export function nodeShape(node: { kind: NodeKind; visual?: NodeVisual }, theme: TopoIRTheme): NonNullable<NodeVisual["shape"]> {
