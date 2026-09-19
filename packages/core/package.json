@@ -1,0 +1,33 @@
+{
+  "name": "@topoir/core",
+  "version": "0.1.0-alpha.0",
+  "description": "TopoIR semantic compiler core and intermediate representations",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22" },
+  "publishConfig": { "access": "public" },
+  "sideEffects": false,
+  "files": ["dist"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --sourcemap --clean",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@topoir/schema": "workspace:*",
+    "dejavu-fonts-ttf": "^2.37.3",
+    "fontkit": "^2.0.4"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/fontkit": "^2.0.9",
+    "tsup": "^8.5.0",
+    "typescript": "^6.0.0"
+  }
+}

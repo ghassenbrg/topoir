@@ -1,0 +1,49 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: zero-trust-network
+  title: Zero-Trust Administrative Access
+model:
+  groups:
+    - { id: untrusted, kind: external-zone, label: Untrusted Networks, layout: { mode: column } }
+    - { id: access-plane, kind: security-boundary, label: Identity-Aware Access Plane, layout: { mode: column } }
+    - { id: cloud, kind: cloud, label: Production Cloud }
+    - { id: management, kind: vpc, label: Management VPC, parent: cloud }
+    - { id: private-services, kind: security-boundary, label: Private Services, parent: cloud, layout: { mode: column } }
+  nodes:
+    - { id: engineer, kind: client, label: Engineer Laptop, group: untrusted }
+    - { id: ci-runner, kind: external-system, label: CI Runner, group: untrusted }
+    - { id: device-posture, kind: service, label: Device Posture, group: access-plane }
+    - { id: identity, kind: identity-provider, label: Workforce Identity, group: access-plane }
+    - { id: access-proxy, kind: gateway, label: Access Proxy, group: access-plane }
+    - { id: bastion, kind: vm, label: Ephemeral Bastion, group: management }
+    - { id: control-api, kind: api, label: Platform Control API, group: management }
+    - { id: kubernetes-api, kind: kubernetes-service, label: Kubernetes API, group: private-services }
+    - { id: database-admin, kind: service, label: Database Admin Endpoint, group: private-services }
+    - { id: secrets, kind: cloud-service, label: Secrets Manager, group: private-services }
+    - { id: audit, kind: stream, label: Immutable Audit Stream, group: cloud }
+  flows:
+    - { id: access, label: Authorized session, color: "#2563EB", style: solid }
+    - { id: policy, label: Policy decision, color: "#D97706", style: solid }
+    - { id: machine, label: Workload identity, color: "#7C3AED", style: dashed }
+    - { id: audit-flow, label: Audit event, color: "#059669", style: dotted }
+  edges:
+    - { id: engineer-posture, from: engineer, to: device-posture, label: attestation, kind: authorize, flow: policy }
+    - { id: engineer-identity, from: engineer, to: identity, label: WebAuthn, kind: authenticate, flow: policy }
+    - { id: identity-proxy, from: identity, to: access-proxy, label: signed claim, kind: authorize, flow: policy }
+    - { id: posture-proxy, from: device-posture, to: access-proxy, label: posture claim, kind: authorize, flow: policy }
+    - { id: proxy-bastion, from: access-proxy, to: bastion, label: short-lived SSH, kind: request, flow: access }
+    - { id: bastion-k8s, from: bastion, to: kubernetes-api, label: kubectl, kind: request, flow: access }
+    - { id: bastion-db, from: bastion, to: database-admin, label: mTLS, kind: request, flow: access }
+    - { id: ci-control, from: ci-runner, to: control-api, label: OIDC token, kind: authenticate, flow: machine }
+    - { id: control-secrets, from: control-api, to: secrets, label: scoped secret, kind: read, flow: machine }
+    - { id: proxy-audit, from: access-proxy, to: audit, label: session, kind: publish, flow: audit-flow }
+    - { id: control-audit, from: control-api, to: audit, label: operation, kind: publish, flow: audit-flow }
+  annotations:
+    - { id: no-network-trust, kind: warning, text: Network location never grants access by itself., anchor: access-proxy }
+views:
+  - id: admin-access
+    title: Zero-Trust Administrative Access
+    layout: { direction: right, spacing: relaxed }
+    showLegend: true
+

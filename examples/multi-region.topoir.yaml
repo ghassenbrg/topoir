@@ -1,0 +1,56 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: multi-region
+  title: Multi-Region Active/Active Service
+  description: Global routing, mirrored application regions, and cross-region replication.
+model:
+  groups:
+    - { id: global-edge, kind: logical, label: Global Services, layout: { mode: column } }
+    - { id: cloud, kind: cloud, label: AWS Cloud }
+    - { id: region-eu, kind: region, label: eu-west-1, parent: cloud }
+    - { id: vpc-eu, kind: vpc, label: EU Production VPC, parent: region-eu }
+    - { id: app-eu, kind: deployment, label: Application Tier, parent: vpc-eu, layout: { mode: column } }
+    - { id: data-eu, kind: security-boundary, label: Data Tier, parent: vpc-eu, layout: { mode: column } }
+    - { id: region-us, kind: region, label: us-east-1, parent: cloud }
+    - { id: vpc-us, kind: vpc, label: US Production VPC, parent: region-us }
+    - { id: app-us, kind: deployment, label: Application Tier, parent: vpc-us, layout: { mode: column } }
+    - { id: data-us, kind: security-boundary, label: Data Tier, parent: vpc-us, layout: { mode: column } }
+  nodes:
+    - { id: users, kind: client, label: Global Users }
+    - { id: route53, kind: cloud-service, label: Global DNS, group: global-edge, technology: route53 }
+    - { id: cdn, kind: gateway, label: Global CDN, group: global-edge, technology: cloudfront }
+    - { id: lb-eu, kind: load-balancer, label: EU Load Balancer, group: app-eu }
+    - { id: api-eu, kind: service, label: EU API, description: stateless replicas, group: app-eu }
+    - { id: redis-eu, kind: cache, label: EU Redis, group: data-eu, technology: redis }
+    - { id: db-eu, kind: database, label: EU Orders, group: data-eu, technology: postgresql }
+    - { id: lb-us, kind: load-balancer, label: US Load Balancer, group: app-us }
+    - { id: api-us, kind: service, label: US API, description: stateless replicas, group: app-us }
+    - { id: redis-us, kind: cache, label: US Redis, group: data-us, technology: redis }
+    - { id: db-us, kind: database, label: US Orders, group: data-us, technology: postgresql }
+    - { id: artifacts, kind: object-storage, label: Global Artifacts, group: cloud }
+  flows:
+    - { id: traffic, label: User traffic, color: "#2563EB", style: solid }
+    - { id: eu-data, label: EU data, color: "#059669", style: solid }
+    - { id: us-data, label: US data, color: "#0891B2", style: solid }
+    - { id: replication, label: Replication, color: "#C026D3", style: dashed }
+  edges:
+    - { id: users-dns, from: users, to: route53, label: DNS, kind: request, flow: traffic }
+    - { id: dns-cdn, from: route53, to: cdn, label: route, kind: control, flow: traffic }
+    - { id: cdn-eu, from: cdn, to: lb-eu, label: nearest region, kind: request, flow: traffic }
+    - { id: cdn-us, from: cdn, to: lb-us, label: nearest region, kind: request, flow: traffic }
+    - { id: lb-api-eu, from: lb-eu, to: api-eu, label: HTTPS, kind: request, flow: traffic }
+    - { id: api-redis-eu, from: api-eu, to: redis-eu, label: sessions, kind: read, flow: eu-data }
+    - { id: api-db-eu, from: api-eu, to: db-eu, label: SQL, kind: write, flow: eu-data }
+    - { id: lb-api-us, from: lb-us, to: api-us, label: HTTPS, kind: request, flow: traffic }
+    - { id: api-redis-us, from: api-us, to: redis-us, label: sessions, kind: read, flow: us-data }
+    - { id: api-db-us, from: api-us, to: db-us, label: SQL, kind: write, flow: us-data }
+    - { id: db-replication, from: db-eu, to: db-us, label: logical replication, kind: replicate, flow: replication, direction: both }
+    - { id: api-eu-artifacts, from: api-eu, to: artifacts, label: assets, kind: read, flow: eu-data }
+    - { id: api-us-artifacts, from: api-us, to: artifacts, label: assets, kind: read, flow: us-data }
+views:
+  - id: global
+    title: Multi-Region Active/Active Service
+    layout: { direction: right, spacing: relaxed }
+    showLegend: true
+

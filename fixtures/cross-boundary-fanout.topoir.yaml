@@ -1,0 +1,22 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata: { name: cross-boundary-fanout, title: Cross-Boundary Fan-out Fixture }
+model:
+  groups:
+    - { id: edge, kind: security-boundary }
+    - { id: cloud, kind: cloud }
+    - { id: cluster, kind: kubernetes-cluster, parent: cloud }
+    - { id: namespace-a, kind: namespace, parent: cluster, layout: { mode: column } }
+    - { id: namespace-b, kind: namespace, parent: cluster, layout: { mode: column } }
+  nodes:
+    - { id: gateway, kind: gateway, group: edge }
+    - { id: service-a1, kind: service, group: namespace-a }
+    - { id: service-a2, kind: service, group: namespace-a }
+    - { id: service-b1, kind: service, group: namespace-b }
+    - { id: service-b2, kind: service, group: namespace-b }
+  edges:
+    - { id: gateway-a1, from: gateway, to: service-a1, label: /a/one, kind: request }
+    - { id: gateway-a2, from: gateway, to: service-a2, label: /a/two, kind: request }
+    - { id: gateway-b1, from: gateway, to: service-b1, label: /b/one, kind: request }
+    - { id: gateway-b2, from: gateway, to: service-b2, label: /b/two, kind: request }
+

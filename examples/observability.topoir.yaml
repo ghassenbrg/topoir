@@ -1,0 +1,47 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: observability
+  title: Unified Observability Pipeline
+model:
+  groups:
+    - { id: workloads, kind: kubernetes-cluster, label: Application Cluster, layout: { mode: column } }
+    - { id: collection, kind: deployment, label: Collection Layer, layout: { mode: column } }
+    - { id: storage, kind: cloud, label: Telemetry Backends, layout: { mode: column } }
+    - { id: experience, kind: logical, label: Operator Experience, layout: { mode: column } }
+  nodes:
+    - { id: frontend, kind: service, label: Web Frontend, group: workloads }
+    - { id: api, kind: api, label: Public API, group: workloads }
+    - { id: worker, kind: worker, label: Background Worker, group: workloads }
+    - { id: otel-agent, kind: service, label: OTel Agents, description: node-local collection, group: collection }
+    - { id: otel-gateway, kind: gateway, label: OTel Gateway, description: sampling and enrichment, group: collection }
+    - { id: prometheus, kind: database, label: Metrics Store, group: storage, technology: prometheus }
+    - { id: loki, kind: database, label: Log Store, group: storage, technology: loki }
+    - { id: tempo, kind: database, label: Trace Store, group: storage, technology: tempo }
+    - { id: grafana, kind: service, label: Grafana, group: experience, technology: grafana }
+    - { id: alertmanager, kind: service, label: Alert Manager, group: experience }
+    - { id: oncall, kind: client, label: On-call Engineer }
+  flows:
+    - { id: metrics, label: Metrics, color: "#059669", style: solid }
+    - { id: logs, label: Logs, color: "#2563EB", style: solid }
+    - { id: traces, label: Traces, color: "#C026D3", style: dashed }
+    - { id: alerts, label: Alerts, color: "#DC2626", style: solid }
+  edges:
+    - { id: frontend-agent, from: frontend, to: otel-agent, label: telemetry, kind: publish, flow: traces }
+    - { id: api-agent, from: api, to: otel-agent, label: telemetry, kind: publish, flow: metrics }
+    - { id: worker-agent, from: worker, to: otel-agent, label: telemetry, kind: publish, flow: logs }
+    - { id: agent-gateway, from: otel-agent, to: otel-gateway, label: OTLP, protocol: OTLP, kind: stream, flow: traces }
+    - { id: gateway-metrics, from: otel-gateway, to: prometheus, label: remote write, kind: write, flow: metrics }
+    - { id: gateway-logs, from: otel-gateway, to: loki, label: push, kind: write, flow: logs }
+    - { id: gateway-traces, from: otel-gateway, to: tempo, label: spans, kind: write, flow: traces }
+    - { id: grafana-metrics, from: grafana, to: prometheus, label: query, kind: read, flow: metrics }
+    - { id: grafana-logs, from: grafana, to: loki, label: query, kind: read, flow: logs }
+    - { id: grafana-traces, from: grafana, to: tempo, label: query, kind: read, flow: traces }
+    - { id: prometheus-alerts, from: prometheus, to: alertmanager, label: firing rules, kind: publish, flow: alerts }
+    - { id: alerts-oncall, from: alertmanager, to: oncall, label: page, kind: request, flow: alerts }
+views:
+  - id: telemetry
+    title: Unified Observability Pipeline
+    layout: { direction: right, spacing: relaxed }
+    showLegend: true
+

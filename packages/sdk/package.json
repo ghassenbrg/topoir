@@ -1,0 +1,35 @@
+{
+  "name": "@topoir/sdk",
+  "version": "0.1.0-alpha.0",
+  "description": "Programmatic TopoIR compiler API",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22" },
+  "publishConfig": { "access": "public" },
+  "sideEffects": false,
+  "files": ["dist"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --sourcemap --clean",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@topoir/assets": "workspace:*",
+    "@topoir/core": "workspace:*",
+    "@topoir/layout-elk": "workspace:*",
+    "@topoir/renderer-svg": "workspace:*",
+    "@topoir/schema": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "fast-check": "^4.3.0",
+    "tsup": "^8.5.0",
+    "typescript": "^6.0.0"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "manifestVersion": 1,
+  "compiler": {
+    "name": "topoir",
+    "version": "0.1.0-alpha.0"
+  },
+  "input": {
+    "source": "/Users/ghassenbrg/git/topoir/examples/pockito-reference.topoir.yaml",
+    "sha256": "79ec691eee8a3eb2a09d71e1d14329890da872f73ba80ce648f2cca8b2315058"
+  },
+  "document": {
+    "name": "pockito-reference",
+    "apiVersion": "topoir.dev/v1alpha1"
+  },
+  "layout": {
+    "engine": "topoir-composition-v1"
+  },
+  "artifacts": [
+    {
+      "viewId": "deployment",
+      "format": "svg",
+      "fileName": "deployment.svg",
+      "mediaType": "image/svg+xml",
+      "sha256": "1eac0060dcd5be5f7f1be5f29433173a68ad84f39b8a567ea270c74a86673f33",
+      "width": 2485.63,
+      "height": 742.5
+    },
+    {
+      "viewId": "deployment",
+      "format": "png",
+      "fileName": "deployment.png",
+      "mediaType": "image/png",
+      "sha256": "54fe5c4362a2e943db95e868684e9f4dcb735733ef9412d394520c981aea8411",
+      "width": 2485.63,
+      "height": 742.5
+    }
+  ]
+}

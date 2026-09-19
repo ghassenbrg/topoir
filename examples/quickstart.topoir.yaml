@@ -1,0 +1,39 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: quickstart
+  title: TopoIR Quickstart
+model:
+  groups:
+    - id: production
+      kind: kubernetes-cluster
+      label: Production Cluster
+  nodes:
+    - id: browser
+      kind: client
+      label: Customer Browser
+    - id: api
+      kind: api
+      label: Payments API
+      group: production
+    - id: postgres
+      kind: database
+      label: Payments Database
+      technology: postgresql
+      group: production
+  edges:
+    - id: browser-to-api
+      from: browser
+      to: api
+      label: HTTPS
+      kind: request
+    - id: api-to-postgres
+      from: api
+      to: postgres
+      label: SQL
+      kind: write
+views:
+  - id: overview
+    layout:
+      direction: right
+

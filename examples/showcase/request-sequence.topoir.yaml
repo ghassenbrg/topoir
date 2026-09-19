@@ -1,0 +1,20 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata: { name: token-exchange, title: Sign in once. Verify every request. }
+model:
+  nodes:
+    - { id: browser, kind: client, label: Browser, icon: 'lucide:panels-top-left', order: 0 }
+    - { id: gateway, kind: gateway, label: Gateway, technology: nginx, order: 1 }
+    - { id: identity, kind: identity-provider, label: Identity, technology: keycloak, order: 2 }
+    - { id: api, kind: api, label: Payments API, technology: go, order: 3 }
+  edges:
+    - { id: login, from: browser, to: identity, label: '1 · Authenticate with PKCE', step: 1, kind: authenticate }
+    - { id: token, from: identity, to: browser, label: '2 · Short-lived access token', step: 2, style: dashed, status: success }
+    - { id: request, from: browser, to: gateway, label: '3 · Bearer token', step: 3, emphasis: primary }
+    - { id: jwks, from: gateway, to: identity, label: '4 · Cached signing keys', step: 4, emphasis: secondary }
+    - { id: forward, from: gateway, to: api, label: '5 · Verified identity', step: 5, emphasis: primary }
+    - { id: response, from: api, to: browser, label: '6 · Authorized response', step: 6, style: dashed, status: success }
+views:
+  - id: overview
+    theme: minimal
+    design: { composition: sequence, audience: engineering, takeaway: Token issuance and request authorization have separate responsibilities., focus: [gateway] }

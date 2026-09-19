@@ -1,0 +1,36 @@
+{
+  "name": "@topoir/mcp",
+  "version": "0.1.0-alpha.0",
+  "description": "Model Context Protocol server for the TopoIR visual compiler",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22" },
+  "publishConfig": { "access": "public" },
+  "files": ["dist"],
+  "bin": {
+    "topoir-mcp": "./dist/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts src/bin.ts --format esm --dts --sourcemap --clean",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.0.0",
+    "@topoir/sdk": "workspace:*",
+    "@topoir/schema": "workspace:*",
+    "zod": "^4.2.0"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "^2.0.0",
+    "@types/node": "^24.0.0",
+    "tsup": "^8.5.0",
+    "typescript": "^6.0.0"
+  }
+}

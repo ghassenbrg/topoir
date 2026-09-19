@@ -1,0 +1,14 @@
+packages:
+  - packages/*
+
+allowBuilds:
+  '@resvg/resvg-js': true
+  esbuild: true
+
+minimumReleaseAgeExclude:
+  - '@iconify-json/devicon@1.2.65'
+  - '@iconify-json/lucide@1.2.134'
+
+onlyBuiltDependencies:
+  - '@resvg/resvg-js'
+  - esbuild

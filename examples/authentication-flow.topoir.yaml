@@ -1,0 +1,59 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: authentication-flow
+  title: Workforce Authentication
+  description: Browser sign-in, identity verification, token validation, and audit flow.
+model:
+  groups:
+    - id: users
+      kind: external-zone
+      label: Workforce
+      layout: { mode: column }
+    - id: edge
+      kind: security-boundary
+      label: Public Edge
+      layout: { mode: column }
+    - id: platform
+      kind: cloud
+      label: Application Cloud
+    - id: private-network
+      kind: vpc
+      label: Private Network
+      parent: platform
+    - id: identity-zone
+      kind: security-boundary
+      label: Identity Zone
+      parent: private-network
+      layout: { mode: column }
+  nodes:
+    - { id: employee, kind: client, label: Employee Browser, group: users }
+    - { id: admin, kind: client, label: Admin Browser, group: users }
+    - { id: waf, kind: firewall, label: Web Application Firewall, group: edge }
+    - { id: gateway, kind: gateway, label: API Gateway, group: edge }
+    - { id: web-app, kind: service, label: Workforce Portal, group: private-network }
+    - { id: auth-service, kind: service, label: Authentication Service, group: identity-zone }
+    - { id: keycloak, kind: identity-provider, label: Keycloak, group: identity-zone, technology: keycloak }
+    - { id: directory, kind: external-system, label: Corporate Directory }
+    - { id: audit-log, kind: stream, label: Security Audit Log, group: private-network }
+  flows:
+    - { id: user-request, label: User request, color: "#2563EB", style: solid }
+    - { id: identity, label: Identity protocol, color: "#D97706", style: solid }
+    - { id: audit, label: Audit event, color: "#C026D3", style: dashed }
+  edges:
+    - { id: employee-to-waf, from: employee, to: waf, label: HTTPS, kind: request, flow: user-request }
+    - { id: admin-to-waf, from: admin, to: waf, label: HTTPS, kind: request, flow: user-request }
+    - { id: waf-to-gateway, from: waf, to: gateway, label: HTTPS, kind: request, flow: user-request }
+    - { id: gateway-to-web, from: gateway, to: web-app, label: route, kind: request, flow: user-request }
+    - { id: web-to-auth, from: web-app, to: auth-service, label: validate session, kind: authenticate, flow: identity }
+    - { id: auth-to-keycloak, from: auth-service, to: keycloak, label: OIDC, protocol: OIDC, kind: authenticate, flow: identity }
+    - { id: keycloak-to-directory, from: keycloak, to: directory, label: LDAP, protocol: LDAPS, kind: authorize, flow: identity }
+    - { id: auth-audit, from: auth-service, to: audit-log, label: login event, kind: publish, flow: audit }
+  annotations:
+    - { id: mfa-note, kind: callout, text: Administrative sessions require phishing-resistant MFA., anchor: keycloak }
+views:
+  - id: auth-flow
+    title: Workforce Authentication — Sign-in and Audit
+    layout: { direction: right, spacing: normal }
+    showLegend: true
+

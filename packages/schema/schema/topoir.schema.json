@@ -1,0 +1,324 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://topoir.dev/schema/v1alpha1/topoir.schema.json",
+  "title": "TopoIR architecture document",
+  "description": "Semantic architecture model compiled by TopoIR into deterministic diagrams.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "model"],
+  "properties": {
+    "apiVersion": { "const": "topoir.dev/v1alpha1" },
+    "kind": { "const": "Architecture" },
+    "metadata": { "$ref": "#/$defs/metadata" },
+    "model": { "$ref": "#/$defs/model" },
+    "views": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/view" }
+    }
+  },
+  "patternProperties": { "^x-": {} },
+  "additionalProperties": false,
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "tags": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/id" },
+      "uniqueItems": true
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "$ref": "#/$defs/id" },
+        "title": { "$ref": "#/$defs/nonEmptyString" },
+        "description": { "type": "string", "maxLength": 8192 },
+        "labels": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/id" },
+          "additionalProperties": { "type": "string", "maxLength": 512 }
+        }
+      },
+      "patternProperties": { "^x-": {} },
+      "additionalProperties": false
+    },
+    "model": {
+      "type": "object",
+      "properties": {
+        "groups": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/group" }
+        },
+        "nodes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/node" }
+        },
+        "edges": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/edge" }
+        },
+        "flows": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/flow" }
+        },
+        "annotations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/annotation" }
+        }
+      },
+      "patternProperties": { "^x-": {} },
+      "additionalProperties": false
+    },
+    "group": {
+      "type": "object",
+      "required": ["id", "kind"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "label": { "$ref": "#/$defs/nonEmptyString" },
+        "kind": {
+          "enum": [
+            "system",
+            "environment",
+            "cloud",
+            "region",
+            "zone",
+            "network",
+            "vpc",
+            "subnet",
+            "kubernetes-cluster",
+            "namespace",
+            "deployment",
+            "security-boundary",
+            "external-zone",
+            "logical"
+          ]
+        },
+        "parent": { "$ref": "#/$defs/id" },
+        "description": { "type": "string", "maxLength": 4096 },
+        "technology": { "$ref": "#/$defs/nonEmptyString" },
+        "icon": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+:[A-Za-z0-9_./-]+$" },
+        "tags": { "$ref": "#/$defs/tags" },
+        "order": { "type": "integer", "minimum": -100000, "maximum": 100000 },
+        "layout": { "$ref": "#/$defs/groupLayout" }
+      },
+      "patternProperties": { "^x-": {} },
+      "additionalProperties": false
+    },
+    "groupLayout": {
+      "type": "object",
+      "properties": {
+        "mode": { "enum": ["auto", "layered", "row", "column", "grid", "pack"] },
+        "direction": { "$ref": "#/$defs/direction" },
+        "columns": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "gap": { "type": "number", "minimum": 0, "maximum": 512 }
+      },
+      "patternProperties": { "^x-": {} },
+      "additionalProperties": false
+    },
+    "node": {
+      "type": "object",
+      "required": ["id", "kind"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "label": { "$ref": "#/$defs/nonEmptyString" },
+        "kind": {
+          "enum": [
+            "client",
+            "service",
+            "api",
+            "worker",
+            "database",
+            "cache",
+            "queue",
+            "stream",
+            "object-storage",
+            "filesystem",
+            "gateway",
+            "load-balancer",
+            "firewall",
+            "identity-provider",
+            "vm",
+            "container",
+            "pod",
+            "kubernetes-service",
+            "function",
+            "cloud-service",
+            "external-system",
+            "generic"
+          ]
+        },
+        "group": { "$ref": "#/$defs/id" },
+        "description": { "type": "string", "maxLength": 4096 },
+        "technology": { "$ref": "#/$defs/nonEmptyString" },
+        "icon": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+:[A-Za-z0-9_./-]+$" },
+        "tags": { "$ref": "#/$defs/tags" },
+        "order": { "type": "integer", "minimum": -100000, "maximum": 100000 },
+        "visual": { "$ref": "#/$defs/nodeVisual" },
+        "ports": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/port" }
+        }
+      },
+      "patternProperties": { "^x-": {} },
+      "additionalProperties": false
+    },
+    "port": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "label": { "$ref": "#/$defs/nonEmptyString" },
+        "side": { "enum": ["north", "east", "south", "west", "auto"] },
+        "kind": { "enum": ["input", "output", "bidirectional"] },
+        "protocol": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "patternProperties": { "^x-": {} },
+      "additionalProperties": false
+    },
+    "edge": {
+      "type": "object",
+      "required": ["id", "from", "to"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "from": { "$ref": "#/$defs/id" },
+        "to": { "$ref": "#/$defs/id" },
+        "sourcePort": { "$ref": "#/$defs/id" },
+        "targetPort": { "$ref": "#/$defs/id" },
+        "label": { "$ref": "#/$defs/nonEmptyString" },
+        "description": { "type": "string", "maxLength": 4096 },
+        "protocol": { "$ref": "#/$defs/nonEmptyString" },
+        "kind": {
+          "enum": [
+            "request",
+            "response",
+            "read",
+            "write",
+            "publish",
+            "consume",
+            "replicate",
+            "authenticate",
+            "authorize",
+            "stream",
+            "sync",
+            "async",
+            "control",
+            "data",
+            "dependency",
+            "network"
+          ]
+        },
+        "flow": { "$ref": "#/$defs/id" },
+        "emphasis": { "enum": ["primary", "secondary", "muted"] },
+        "status": { "enum": ["normal", "success", "failure", "warning"] },
+        "step": { "type": "integer", "minimum": 1, "maximum": 999 },
+        "direction": { "enum": ["forward", "back", "both", "none"] },
+        "style": { "enum": ["solid", "dashed", "dotted"] },
+        "tags": { "$ref": "#/$defs/tags" },
+        "order": { "type": "integer", "minimum": -100000, "maximum": 100000 }
+      },
+      "patternProperties": { "^x-": {} },
+      "additionalProperties": false
+    },
+    "flow": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "label": { "$ref": "#/$defs/nonEmptyString" },
+        "description": { "type": "string", "maxLength": 4096 },
+        "color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+        "style": { "enum": ["solid", "dashed", "dotted"] },
+        "order": { "type": "integer", "minimum": -100000, "maximum": 100000 }
+      },
+      "patternProperties": { "^x-": {} },
+      "additionalProperties": false
+    },
+    "annotation": {
+      "type": "object",
+      "required": ["id", "text"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": { "enum": ["note", "warning", "callout"] },
+        "text": { "$ref": "#/$defs/nonEmptyString" },
+        "anchor": { "$ref": "#/$defs/id" },
+        "tags": { "$ref": "#/$defs/tags" },
+        "order": { "type": "integer", "minimum": -100000, "maximum": 100000 }
+      },
+      "patternProperties": { "^x-": {} },
+      "additionalProperties": false
+    },
+    "view": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "title": { "$ref": "#/$defs/nonEmptyString" },
+        "description": { "type": "string", "maxLength": 4096 },
+        "include": { "$ref": "#/$defs/selector" },
+        "exclude": { "$ref": "#/$defs/selector" },
+        "layout": { "$ref": "#/$defs/viewLayout" },
+        "theme": { "$ref": "#/$defs/id" },
+        "showLegend": { "type": "boolean" },
+        "design": { "$ref": "#/$defs/design" }
+      },
+      "patternProperties": { "^x-": {} },
+      "additionalProperties": false
+    },
+    "selector": {
+      "type": "object",
+      "properties": {
+        "groups": { "type": "array", "items": { "$ref": "#/$defs/id" }, "uniqueItems": true },
+        "nodes": { "type": "array", "items": { "$ref": "#/$defs/id" }, "uniqueItems": true },
+        "edges": { "type": "array", "items": { "$ref": "#/$defs/id" }, "uniqueItems": true },
+        "tags": { "type": "array", "items": { "$ref": "#/$defs/id" }, "uniqueItems": true }
+      },
+      "minProperties": 1,
+      "patternProperties": { "^x-": {} },
+      "additionalProperties": false
+    },
+    "viewLayout": {
+      "type": "object",
+      "properties": {
+        "engine": { "enum": ["auto", "layered"] },
+        "direction": { "$ref": "#/$defs/direction" },
+        "aspectRatio": { "type": "number", "exclusiveMinimum": 0.1, "maximum": 10 },
+        "spacing": { "enum": ["compact", "normal", "relaxed"] }
+      },
+      "patternProperties": { "^x-": {} },
+      "additionalProperties": false
+    },
+    "nodeVisual": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "shape": { "enum": ["auto", "card", "icon", "cylinder", "stack", "pill", "diamond", "image"] },
+        "emphasis": { "enum": ["primary", "secondary", "muted"] },
+        "status": { "enum": ["normal", "success", "failure", "warning"] },
+        "badge": { "type": "string", "minLength": 1, "maxLength": 48 },
+        "replicas": { "type": "integer", "minimum": 1, "maximum": 9999 },
+        "asset": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "design": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "composition": { "enum": ["topology", "layers", "sequence", "swimlanes", "comparison"] },
+        "audience": { "enum": ["engineering", "executive", "presentation"] },
+        "takeaway": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "focus": { "type": "array", "items": { "$ref": "#/$defs/id" }, "uniqueItems": true },
+        "story": { "type": "array", "items": { "$ref": "#/$defs/id" }, "uniqueItems": true },
+        "optimize": { "type": "boolean" }
+      }
+    },
+    "direction": { "enum": ["right", "left", "down", "up"] }
+  }
+}

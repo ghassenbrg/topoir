@@ -1,0 +1,21 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata: { name: product-platform, title: From customer intent to a completed order. }
+model:
+  groups:
+    - { id: experience, kind: logical, label: '01 / Customer experience', order: 0 }
+    - { id: orchestration, kind: logical, label: '02 / Business capabilities', order: 1 }
+    - { id: fulfillment, kind: logical, label: '03 / Fulfillment', order: 2 }
+  nodes:
+    - { id: storefront, kind: client, group: experience, label: Storefront, description: Discover · choose · purchase, technology: react, order: 0 }
+    - { id: orders, kind: api, group: orchestration, label: Order orchestration, description: One consistent order lifecycle, visual: { emphasis: primary }, order: 1 }
+    - { id: payments, kind: service, group: fulfillment, label: Payments, description: Authorize and settle, icon: 'lucide:credit-card', order: 2 }
+    - { id: delivery, kind: service, group: fulfillment, label: Delivery, description: Reserve and dispatch, icon: 'lucide:truck', order: 3 }
+  edges:
+    - { id: place, from: storefront, to: orders, label: Place an order, emphasis: primary }
+    - { id: pay, from: orders, to: payments, label: Confirm payment }
+    - { id: ship, from: orders, to: delivery, label: Arrange delivery }
+views:
+  - id: overview
+    theme: executive
+    design: { composition: topology, audience: executive, takeaway: A single orchestration layer owns the customer promise across payment and delivery., focus: [orders], story: [place] }

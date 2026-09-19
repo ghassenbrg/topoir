@@ -1,0 +1,22 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata: { name: analytics-pipeline, title: Events become trusted data products. }
+model:
+  groups:
+    - { id: collect, kind: logical, label: Collect, order: 0 }
+    - { id: process, kind: logical, label: Process, order: 1 }
+    - { id: serve, kind: logical, label: Serve, order: 2 }
+  nodes:
+    - { id: events, kind: stream, group: collect, technology: kafka, label: Event backbone, description: Immutable source events, order: 0 }
+    - { id: transform, kind: worker, group: process, technology: python, label: Transform & validate, description: Versioned data contracts, order: 1 }
+    - { id: warehouse, kind: database, group: serve, technology: postgresql, label: Curated warehouse, description: Governed analytical model, order: 2 }
+    - { id: dashboard, kind: client, group: serve, technology: grafana, label: Decision surfaces, description: Trusted operational metrics, order: 3 }
+  edges:
+    - { id: ingest, from: events, to: transform, label: Consume, kind: consume, emphasis: primary }
+    - { id: load, from: transform, to: warehouse, label: Validated batches, kind: write, emphasis: primary }
+    - { id: query, from: warehouse, to: dashboard, label: Query, kind: read }
+views:
+  - id: overview
+    theme: blueprint
+    layout: { direction: right, spacing: compact }
+    design: { composition: topology, takeaway: 'Preserve raw events; publish only validated, governed datasets.', focus: [transform], story: [ingest, load] }

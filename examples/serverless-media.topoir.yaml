@@ -1,0 +1,48 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: serverless-media
+  title: Serverless Media Processing
+model:
+  groups:
+    - { id: clients, kind: external-zone, label: Content Creators }
+    - { id: cloud, kind: cloud, label: Cloud Platform }
+    - { id: ingest, kind: deployment, label: Ingestion, parent: cloud }
+    - { id: processing, kind: deployment, label: Processing Workers, parent: cloud, layout: { mode: column } }
+    - { id: persistence, kind: security-boundary, label: Media Persistence, parent: cloud, layout: { mode: column } }
+  nodes:
+    - { id: creator, kind: client, label: Creator App, group: clients }
+    - { id: api-gateway, kind: gateway, label: Upload API, group: ingest }
+    - { id: authorizer, kind: function, label: Request Authorizer, group: ingest }
+    - { id: upload-function, kind: function, label: Upload Handler, group: ingest }
+    - { id: jobs, kind: queue, label: Processing Queue, group: cloud }
+    - { id: transcoder, kind: worker, label: Video Transcoder, group: processing }
+    - { id: thumbnailer, kind: worker, label: Thumbnail Generator, group: processing }
+    - { id: scanner, kind: worker, label: Safety Scanner, group: processing }
+    - { id: originals, kind: object-storage, label: Original Media, group: persistence }
+    - { id: renditions, kind: object-storage, label: Renditions, group: persistence }
+    - { id: metadata, kind: database, label: Media Metadata, group: persistence }
+    - { id: notifications, kind: stream, label: Completion Events, group: cloud }
+  flows:
+    - { id: upload, label: Upload request, color: "#2563EB", style: solid }
+    - { id: work, label: Async work, color: "#C026D3", style: dashed }
+    - { id: storage-flow, label: Storage, color: "#059669", style: solid }
+  edges:
+    - { id: creator-gateway, from: creator, to: api-gateway, label: HTTPS, kind: request, flow: upload }
+    - { id: gateway-authorizer, from: api-gateway, to: authorizer, label: authorize, kind: authorize, flow: upload }
+    - { id: gateway-upload, from: api-gateway, to: upload-function, label: invoke, kind: request, flow: upload }
+    - { id: upload-originals, from: upload-function, to: originals, label: object, kind: write, flow: storage-flow }
+    - { id: upload-jobs, from: upload-function, to: jobs, label: media.uploaded, kind: publish, flow: work }
+    - { id: jobs-transcoder, from: jobs, to: transcoder, label: consume, kind: consume, flow: work }
+    - { id: jobs-thumbnailer, from: jobs, to: thumbnailer, label: consume, kind: consume, flow: work }
+    - { id: jobs-scanner, from: jobs, to: scanner, label: consume, kind: consume, flow: work }
+    - { id: transcoder-renditions, from: transcoder, to: renditions, label: variants, kind: write, flow: storage-flow }
+    - { id: thumbnailer-renditions, from: thumbnailer, to: renditions, label: previews, kind: write, flow: storage-flow }
+    - { id: scanner-metadata, from: scanner, to: metadata, label: safety status, kind: write, flow: storage-flow }
+    - { id: transcoder-notify, from: transcoder, to: notifications, label: ready, kind: publish, flow: work }
+views:
+  - id: pipeline
+    title: Serverless Media Processing
+    layout: { direction: right, spacing: normal }
+    showLegend: true
+

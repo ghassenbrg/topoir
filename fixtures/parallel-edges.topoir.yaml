@@ -1,0 +1,22 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata: { name: parallel-edges, title: Parallel Edges Fixture }
+model:
+  nodes:
+    - id: application
+      kind: service
+      ports:
+        - { id: read, side: east, kind: output }
+        - { id: write, side: east, kind: output }
+        - { id: events, side: east, kind: output }
+    - id: database
+      kind: database
+      ports:
+        - { id: reader, side: west, kind: input }
+        - { id: writer, side: west, kind: input }
+        - { id: changes, side: west, kind: input }
+  edges:
+    - { id: read, from: application, sourcePort: read, to: database, targetPort: reader, label: SELECT, kind: read }
+    - { id: write, from: application, sourcePort: write, to: database, targetPort: writer, label: INSERT, kind: write }
+    - { id: changes, from: application, sourcePort: events, to: database, targetPort: changes, label: CDC, kind: stream, style: dashed }
+

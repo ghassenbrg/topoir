@@ -1,0 +1,53 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: disaster-recovery
+  title: Regional Disaster Recovery
+model:
+  groups:
+    - { id: control-plane, kind: logical, label: Recovery Control Plane, layout: { mode: column } }
+    - { id: primary, kind: region, label: Primary Region }
+    - { id: primary-app, kind: vpc, label: Primary VPC, parent: primary }
+    - { id: primary-data, kind: security-boundary, label: Primary Data, parent: primary, layout: { mode: column } }
+    - { id: standby, kind: region, label: Standby Region }
+    - { id: standby-app, kind: vpc, label: Standby VPC, parent: standby }
+    - { id: standby-data, kind: security-boundary, label: Standby Data, parent: standby, layout: { mode: column } }
+  nodes:
+    - { id: dns, kind: cloud-service, label: Health-Aware DNS, group: control-plane }
+    - { id: orchestrator, kind: service, label: Recovery Orchestrator, group: control-plane }
+    - { id: backup-vault, kind: object-storage, label: Immutable Backup Vault, group: control-plane }
+    - { id: primary-lb, kind: load-balancer, label: Primary Load Balancer, group: primary-app }
+    - { id: primary-api, kind: service, label: Primary API, group: primary-app }
+    - { id: primary-db, kind: database, label: Primary Database, group: primary-data }
+    - { id: primary-files, kind: object-storage, label: Primary Objects, group: primary-data }
+    - { id: standby-lb, kind: load-balancer, label: Standby Load Balancer, group: standby-app }
+    - { id: standby-api, kind: service, label: Warm Standby API, group: standby-app }
+    - { id: standby-db, kind: database, label: Standby Database, group: standby-data }
+    - { id: standby-files, kind: object-storage, label: Replicated Objects, group: standby-data }
+    - { id: users, kind: client, label: Customers }
+  flows:
+    - { id: traffic, label: Active traffic, color: "#2563EB", style: solid }
+    - { id: replication, label: Continuous replication, color: "#C026D3", style: dashed }
+    - { id: recovery, label: Recovery control, color: "#D97706", style: dotted }
+    - { id: backups, label: Backups, color: "#059669", style: solid }
+  edges:
+    - { id: users-dns, from: users, to: dns, label: DNS, kind: request, flow: traffic }
+    - { id: dns-primary, from: dns, to: primary-lb, label: active, kind: request, flow: traffic }
+    - { id: primary-lb-api, from: primary-lb, to: primary-api, label: HTTPS, kind: request, flow: traffic }
+    - { id: primary-api-db, from: primary-api, to: primary-db, label: SQL, kind: write, flow: traffic }
+    - { id: primary-api-files, from: primary-api, to: primary-files, label: objects, kind: write, flow: traffic }
+    - { id: db-replication, from: primary-db, to: standby-db, label: async replication, kind: replicate, flow: replication }
+    - { id: object-replication, from: primary-files, to: standby-files, label: cross-region copy, kind: replicate, flow: replication }
+    - { id: primary-backup, from: primary-db, to: backup-vault, label: snapshots, kind: write, flow: backups }
+    - { id: orchestrator-dns, from: orchestrator, to: dns, label: failover, kind: control, flow: recovery }
+    - { id: orchestrator-api, from: orchestrator, to: standby-api, label: scale up, kind: control, flow: recovery }
+    - { id: orchestrator-db, from: orchestrator, to: standby-db, label: promote, kind: control, flow: recovery }
+    - { id: standby-lb-api, from: standby-lb, to: standby-api, label: HTTPS, kind: request, flow: traffic }
+    - { id: standby-api-db, from: standby-api, to: standby-db, label: SQL, kind: write, flow: traffic }
+  annotations:
+    - { id: objective, kind: warning, text: Recovery objective is RTO 15 minutes and RPO under 5 minutes., anchor: orchestrator }
+views:
+  - id: failover
+    title: Regional Disaster Recovery
+    layout: { direction: right, spacing: relaxed }
+    showLegend: true

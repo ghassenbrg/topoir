@@ -1,0 +1,245 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: checkout-platform
+  title: Checkout Platform
+  description: Multi-boundary request, asynchronous processing, and persistence flows.
+  labels:
+    owner: commerce-platform
+
+model:
+  groups:
+    - id: internet
+      kind: external-zone
+      label: Internet
+      layout:
+        mode: column
+      tags: [context]
+
+    - id: aws
+      kind: cloud
+      label: AWS Cloud
+      layout:
+        direction: right
+      tags: [runtime]
+
+    - id: eu-west-1
+      kind: region
+      label: eu-west-1
+      parent: aws
+      tags: [runtime]
+
+    - id: production-vpc
+      kind: vpc
+      label: Production VPC
+      parent: eu-west-1
+      tags: [runtime]
+
+    - id: eks
+      kind: kubernetes-cluster
+      label: Checkout EKS
+      parent: production-vpc
+      layout:
+        direction: right
+      tags: [runtime]
+
+    - id: data-tier
+      kind: security-boundary
+      label: Data Tier
+      parent: production-vpc
+      layout:
+        mode: column
+      tags: [runtime, data]
+
+  nodes:
+    - id: shopper
+      kind: client
+      label: Shopper
+      description: Web and mobile clients
+      group: internet
+      tags: [context]
+
+    - id: cloudfront
+      kind: gateway
+      label: CloudFront
+      description: CDN and edge protection
+      group: aws
+      technology: cloudfront
+      tags: [context, runtime]
+
+    - id: ingress
+      kind: load-balancer
+      label: Public Ingress
+      description: TLS termination
+      group: eks
+      ports:
+        - id: public
+          side: west
+          kind: input
+        - id: internal
+          side: east
+          kind: output
+      tags: [runtime]
+
+    - id: checkout-api
+      kind: api
+      label: Checkout API
+      description: Validates carts and creates orders
+      group: eks
+      ports:
+        - id: http
+          side: west
+          kind: input
+        - id: events
+          side: east
+          kind: output
+        - id: data
+          side: south
+          kind: output
+      tags: [runtime, checkout]
+
+    - id: order-events
+      kind: queue
+      label: Order Events
+      description: Durable async work queue
+      group: eks
+      technology: kafka
+      tags: [runtime, async]
+
+    - id: fulfillment-worker
+      kind: worker
+      label: Fulfillment Worker
+      description: Reserves stock and dispatches orders
+      group: eks
+      tags: [runtime, async]
+
+    - id: redis
+      kind: cache
+      label: Cart Cache
+      technology: redis
+      group: data-tier
+      tags: [runtime, data]
+
+    - id: postgres
+      kind: database
+      label: Orders Database
+      technology: postgresql
+      group: data-tier
+      tags: [runtime, data]
+
+  flows:
+    - id: request-flow
+      label: Synchronous request
+      color: "#2563EB"
+      style: solid
+      order: 1
+
+    - id: event-flow
+      label: Asynchronous event
+      color: "#C026D3"
+      style: dashed
+      order: 2
+
+    - id: data-flow
+      label: Data access
+      color: "#059669"
+      style: solid
+      order: 3
+
+  edges:
+    - id: shopper-to-edge
+      from: shopper
+      to: cloudfront
+      label: HTTPS
+      protocol: HTTPS
+      kind: request
+      flow: request-flow
+
+    - id: edge-to-ingress
+      from: cloudfront
+      to: ingress
+      targetPort: public
+      label: HTTPS
+      kind: request
+      flow: request-flow
+
+    - id: ingress-to-api
+      from: ingress
+      sourcePort: internal
+      to: checkout-api
+      targetPort: http
+      label: HTTP/2
+      kind: request
+      flow: request-flow
+
+    - id: api-publishes-order
+      from: checkout-api
+      sourcePort: events
+      to: order-events
+      label: order.created
+      kind: publish
+      flow: event-flow
+
+    - id: worker-consumes-order
+      from: order-events
+      to: fulfillment-worker
+      label: consume
+      kind: consume
+      flow: event-flow
+
+    - id: api-to-cache
+      from: checkout-api
+      sourcePort: data
+      to: redis
+      label: cart state
+      kind: read
+      flow: data-flow
+
+    - id: api-to-orders
+      from: checkout-api
+      sourcePort: data
+      to: postgres
+      label: SQL
+      protocol: PostgreSQL
+      kind: write
+      flow: data-flow
+
+    - id: worker-to-orders
+      from: fulfillment-worker
+      to: postgres
+      label: update status
+      kind: write
+      flow: data-flow
+
+  annotations:
+    - id: checkout-slo
+      kind: callout
+      text: Checkout API target p95 latency is below 250 ms.
+      anchor: checkout-api
+      tags: [runtime]
+
+views:
+  - id: overview
+    title: Checkout Platform — System Overview
+    layout:
+      direction: right
+      spacing: normal
+    showLegend: true
+
+  - id: runtime
+    title: Checkout Platform — Runtime
+    include:
+      tags: [runtime]
+    layout:
+      direction: right
+      spacing: normal
+    showLegend: true
+
+  - id: data
+    title: Checkout Platform — Data Flow
+    include:
+      nodes: [checkout-api, fulfillment-worker, redis, postgres]
+    layout:
+      direction: right
+      spacing: relaxed
+    showLegend: true

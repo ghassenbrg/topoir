@@ -1,0 +1,21 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata: { name: long-pipeline, title: Long Pipeline Fixture }
+model:
+  nodes:
+    - { id: stage-01, kind: service }
+    - { id: stage-02, kind: service }
+    - { id: stage-03, kind: worker }
+    - { id: stage-04, kind: queue }
+    - { id: stage-05, kind: worker }
+    - { id: stage-06, kind: service }
+    - { id: stage-07, kind: cache }
+    - { id: stage-08, kind: database }
+  edges:
+    - { id: edge-01, from: stage-01, to: stage-02, label: "1" }
+    - { id: edge-02, from: stage-02, to: stage-03, label: "2" }
+    - { id: edge-03, from: stage-03, to: stage-04, label: "3" }
+    - { id: edge-04, from: stage-04, to: stage-05, label: "4" }
+    - { id: edge-05, from: stage-05, to: stage-06, label: "5" }
+    - { id: edge-06, from: stage-06, to: stage-07, label: "6" }
+    - { id: edge-07, from: stage-07, to: stage-08, label: "7" }

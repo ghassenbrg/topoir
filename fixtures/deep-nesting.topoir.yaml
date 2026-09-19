@@ -1,0 +1,17 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata: { name: deep-nesting, title: Deep Nesting Fixture }
+model:
+  groups:
+    - { id: cloud, kind: cloud }
+    - { id: region, kind: region, parent: cloud }
+    - { id: vpc, kind: vpc, parent: region }
+    - { id: subnet, kind: subnet, parent: vpc }
+    - { id: cluster, kind: kubernetes-cluster, parent: subnet }
+    - { id: namespace, kind: namespace, parent: cluster }
+  nodes:
+    - { id: client, kind: client }
+    - { id: service, kind: service, group: namespace }
+  edges:
+    - { id: request, from: client, to: service, label: HTTPS, kind: request }
+

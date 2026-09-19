@@ -1,0 +1,31 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata: { name: kubernetes-platform, title: The request path through the platform. }
+model:
+  groups:
+    - { id: clients, kind: external-zone, label: Clients, order: 0 }
+    - { id: cluster, kind: kubernetes-cluster, label: Production / Kubernetes, order: 1 }
+    - { id: apps, parent: cluster, kind: namespace, label: Application workloads, order: 0 }
+    - { id: state, parent: cluster, kind: namespace, label: Stateful services, order: 1 }
+  nodes:
+    - { id: web, kind: client, group: clients, label: Web app, technology: react, order: 0 }
+    - { id: mobile, kind: client, group: clients, label: Mobile app, technology: flutter, order: 1 }
+    - { id: ingress, kind: gateway, group: apps, label: Ingress, technology: nginx, order: 2 }
+    - { id: api, kind: pod, group: apps, label: Application API, technology: go, visual: { replicas: 3 }, order: 3 }
+    - { id: workers, kind: pod, group: apps, label: Event consumers, technology: python, visual: { replicas: 4 }, order: 4 }
+    - { id: redis, kind: cache, group: state, label: Redis, technology: redis, order: 5 }
+    - { id: postgres, kind: database, group: state, label: PostgreSQL, technology: postgresql, order: 6 }
+    - { id: kafka, kind: stream, group: state, label: Event log, technology: kafka, order: 7 }
+  edges:
+    - { id: web-in, from: web, to: ingress, emphasis: primary }
+    - { id: mobile-in, from: mobile, to: ingress, emphasis: secondary }
+    - { id: route, from: ingress, to: api, label: /api/*, emphasis: primary }
+    - { id: cached, from: api, to: redis, label: Cache, kind: read }
+    - { id: durable, from: api, to: postgres, label: Transactions, kind: write }
+    - { id: publish, from: api, to: kafka, label: Domain events, kind: publish, style: dashed }
+    - { id: consume, from: kafka, to: workers, kind: consume, style: dashed }
+views:
+  - id: overview
+    theme: dark-engineering
+    layout: { direction: right, spacing: compact, aspectRatio: 1.8 }
+    design: { composition: topology, audience: engineering, takeaway: The API serves synchronous traffic; consumers process domain events independently., focus: [api], story: [web-in, route] }

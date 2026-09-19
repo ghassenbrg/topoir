@@ -1,0 +1,50 @@
+[
+  {
+    "id": "ref-01-event-flow",
+    "reference": "exple1.jpg",
+    "source": "examples/event-streaming.topoir.yaml",
+    "coverage": "partial",
+    "required": ["asymmetric producer/broker/consumer regions", "nested VM boundary", "colored publish/consume flows", "message payload cards", "file outputs", "attached explanatory notes"],
+    "gaps": ["Current fixture is a related event backbone, not the complete reference topology.", "Payload/file components and asymmetric region composition are not yet equivalent."]
+  },
+  {
+    "id": "ref-02-repeated-clusters",
+    "reference": "exple2.jpg",
+    "source": "examples/showcase/kubernetes.topoir.yaml",
+    "coverage": "partial",
+    "required": ["three aligned workload clusters", "image-backed clients", "shared databases", "remote cloud and data-center domains", "independently traceable cross-cluster paths"],
+    "gaps": ["Current fixture has a single cluster; three unequal repeated clusters remain a required benchmark fixture.", "Custom client images work separately, but combined image/cluster composition has not reached parity."]
+  },
+  {
+    "id": "ref-03-trust-zones",
+    "reference": "exple3.jpg",
+    "source": "examples/zero-trust-network.topoir.yaml",
+    "coverage": "partial",
+    "required": ["four differently sized zones", "dominant horizontal request path", "storage below compute", "vertical external-system branches", "secondary session/context flows", "anchored callout"],
+    "gaps": ["The related security fixture does not preserve the reference's primary path and lower support branches.", "Narrative spine constraints and mixed local orientation remain incomplete."]
+  },
+  {
+    "id": "ref-04-pockito",
+    "reference": "exple4.png",
+    "source": "examples/pockito-reference.topoir.yaml",
+    "coverage": "semantic-reconstruction",
+    "required": ["three client entry points", "gateway with three internal routes", "stacked Kubernetes workloads", "platform and persistence services", "quiet identity paths", "multiple identifying assets per component"],
+    "gaps": ["Semantic entities and flows are reconstructed, but the gateway's internal route compartments are flattened.", "Compound icon/logo cards and reference-level placement remain incomplete; generic fallbacks are not vendor logos."]
+  },
+  {
+    "id": "ref-05-conceptual-sketch",
+    "reference": "exple5.png",
+    "source": "examples/showcase/system-pattern.topoir.yaml",
+    "coverage": "partial",
+    "required": ["vertical narrative", "cache/storage and queue/worker branches", "unequal visual weight", "illustrative component grammar", "observability surround", "intentional informal typography"],
+    "gaps": ["The whiteboard language supplies deterministic accents, not the reference's illustrated sketch grammar.", "Observability surround, custom silhouettes and rich internal illustrations are not implemented."]
+  },
+  {
+    "id": "ref-06-cloud-regions",
+    "reference": "exple6.png",
+    "source": "examples/showcase/paired-regions.topoir.yaml",
+    "coverage": "partial",
+    "required": ["paired regions with nested VPCs", "shared global services", "aligned replication rows", "transit networking", "multiple independent replication links", "legally sourced provider artwork"],
+    "gaps": ["Aligned regional rows work, but the current six-node fixture is much simpler than the reference.", "Nested VPCs, global services, transit, full replication density and provider-native artwork still need a full benchmark fixture."]
+  }
+]

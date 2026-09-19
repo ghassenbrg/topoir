@@ -1,0 +1,6 @@
+assets:
+  payment-portal:
+    file: payment portal.svg
+    aliases: [payments, customer portal]
+    description: Fictional payment portal UI illustration created for the TopoIR demo
+    license: MIT; Copyright (c) 2026 Ghassen Bargougui

@@ -1,0 +1,136 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: pockito-reference
+  title: Pockito Kubernetes Deployment
+  description: Reproduction of the supplied Pockito deployment diagram using semantic TopoIR entities.
+model:
+  groups:
+    - id: clients
+      kind: external-zone
+      label: Clients
+      layout: { mode: column }
+    - id: cluster
+      kind: kubernetes-cluster
+      label: VM — K8S — default cluster
+    - id: ingress
+      kind: logical
+      label: Ingress & routes
+      parent: cluster
+      layout: { mode: column }
+    - id: pockito-workloads
+      kind: namespace
+      label: Pockito workloads
+      parent: cluster
+      layout: { mode: column }
+    - id: platform-services
+      kind: namespace
+      label: Platform services
+      parent: cluster
+      layout: { mode: column }
+    - id: state
+      kind: logical
+      label: Cache + Streams
+      parent: cluster
+      layout: { mode: column }
+  nodes:
+    - id: mobile-app
+      kind: client
+      label: Mobile App
+      group: clients
+    - id: web-app
+      kind: client
+      label: Web App
+      group: clients
+    - id: ai-agent
+      kind: client
+      label: AI Agent
+      group: clients
+    - id: traefik
+      kind: gateway
+      label: Traefik
+      description: /app/* · /api/* · /mcp/*
+      group: ingress
+      technology: traefik
+    - id: pockito-webapp
+      kind: pod
+      label: Pockito-webapp
+      group: pockito-workloads
+    - id: pockito-api
+      kind: pod
+      label: Pockito-api
+      group: pockito-workloads
+    - id: pockito-mcp
+      kind: pod
+      label: Pockito-mcp
+      group: pockito-workloads
+    - id: pockito-core
+      kind: pod
+      label: Pockito-core
+      description: Pockito
+      group: platform-services
+    - id: dify
+      kind: pod
+      label: Dify
+      group: platform-services
+    - id: keycloak
+      kind: identity-provider
+      label: Keycloak
+      group: platform-services
+      technology: keycloak
+    - id: seaweedfs
+      kind: filesystem
+      label: SeaweedFS
+      group: platform-services
+      technology: seaweedfs
+    - id: redis
+      kind: cache
+      label: Redis
+      group: state
+      technology: redis
+    - id: postgresql
+      kind: database
+      label: PostgreSQL
+      group: state
+      technology: postgresql
+  flows:
+    - id: client-traffic
+      label: Client traffic
+      color: "#1F2937"
+      style: dashed
+    - id: app-routing
+      label: Application routing
+      color: "#38BDF8"
+      style: dashed
+    - id: platform-api
+      label: Platform API
+      color: "#2563EB"
+      style: dashed
+    - id: identity
+      label: Identity
+      color: "#6B7280"
+      style: dashed
+    - id: data-access
+      label: Data access
+      color: "#2563EB"
+      style: dashed
+  edges:
+    - { id: mobile-traefik, from: mobile-app, to: traefik, kind: request, flow: client-traffic, label: HTTPS }
+    - { id: web-traefik, from: web-app, to: traefik, kind: request, flow: client-traffic, label: HTTPS }
+    - { id: agent-traefik, from: ai-agent, to: traefik, kind: request, flow: client-traffic, label: HTTPS }
+    - { id: traefik-webapp, from: traefik, to: pockito-webapp, kind: request, flow: app-routing, label: /app/* }
+    - { id: traefik-api, from: traefik, to: pockito-api, kind: request, flow: app-routing, label: /api/* }
+    - { id: traefik-mcp, from: traefik, to: pockito-mcp, kind: request, flow: app-routing, label: /mcp/* }
+    - { id: api-core, from: pockito-api, to: pockito-core, kind: request, flow: platform-api, label: API }
+    - { id: mcp-keycloak, from: pockito-mcp, to: keycloak, kind: authenticate, flow: identity, label: JWKS / token issuer }
+    - { id: traefik-keycloak, from: traefik, to: keycloak, kind: authenticate, flow: identity, label: OIDC login }
+    - { id: core-keycloak, from: pockito-core, to: keycloak, kind: authorize, flow: identity, label: Admin API / IAM }
+    - { id: core-dify, from: pockito-core, to: dify, kind: request, flow: platform-api, label: LLM workflow }
+    - { id: core-seaweedfs, from: pockito-core, to: seaweedfs, kind: read, flow: data-access, label: S3 API }
+    - { id: core-redis, from: pockito-core, to: redis, kind: read, flow: data-access, label: cache }
+    - { id: core-postgres, from: pockito-core, to: postgresql, kind: write, flow: data-access, label: SQL }
+views:
+  - id: deployment
+    title: Pockito Kubernetes Deployment
+    layout: { direction: right, spacing: relaxed }
+    showLegend: true

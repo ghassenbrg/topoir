@@ -1,0 +1,65 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: event-streaming
+  title: Commerce Event Backbone
+  description: Producers publish versioned events to a shared Kafka platform and independent consumers.
+model:
+  groups:
+    - id: producers
+      kind: logical
+      label: Event Producers
+      layout: { mode: column }
+    - id: streaming-platform
+      kind: cloud
+      label: Managed Streaming Platform
+    - id: kafka-cluster
+      kind: deployment
+      label: Kafka Cluster
+      parent: streaming-platform
+      layout: { mode: column }
+    - id: consumers
+      kind: logical
+      label: Event Consumers
+      layout: { mode: column }
+    - id: operations
+      kind: logical
+      label: Operations
+      layout: { mode: column }
+  nodes:
+    - { id: orders-api, kind: api, label: Orders API, group: producers }
+    - { id: catalog-api, kind: api, label: Catalog API, group: producers }
+    - { id: payments-api, kind: api, label: Payments API, group: producers }
+    - { id: orders-topic, kind: stream, label: orders.v1, group: kafka-cluster, technology: kafka }
+    - { id: catalog-topic, kind: stream, label: catalog.v1, group: kafka-cluster, technology: kafka }
+    - { id: payments-topic, kind: stream, label: payments.v1, group: kafka-cluster, technology: kafka }
+    - { id: fulfillment, kind: worker, label: Fulfillment, group: consumers }
+    - { id: search-indexer, kind: worker, label: Search Indexer, group: consumers }
+    - { id: fraud-engine, kind: worker, label: Fraud Engine, group: consumers }
+    - { id: analytics, kind: cloud-service, label: Analytics Lake, group: consumers }
+    - { id: schema-registry, kind: service, label: Schema Registry, group: operations }
+    - { id: stream-monitor, kind: service, label: Consumer Lag Monitor, group: operations }
+  flows:
+    - { id: order-events, label: Order events, color: "#2563EB", style: solid }
+    - { id: catalog-events, label: Catalog events, color: "#059669", style: solid }
+    - { id: payment-events, label: Payment events, color: "#C026D3", style: dashed }
+    - { id: control, label: Platform control, color: "#64748B", style: dotted }
+  edges:
+    - { id: orders-publish, from: orders-api, to: orders-topic, label: publish, kind: publish, flow: order-events }
+    - { id: catalog-publish, from: catalog-api, to: catalog-topic, label: publish, kind: publish, flow: catalog-events }
+    - { id: payments-publish, from: payments-api, to: payments-topic, label: publish, kind: publish, flow: payment-events }
+    - { id: orders-to-fulfillment, from: orders-topic, to: fulfillment, label: consume, kind: consume, flow: order-events }
+    - { id: catalog-to-search, from: catalog-topic, to: search-indexer, label: consume, kind: consume, flow: catalog-events }
+    - { id: payments-to-fraud, from: payments-topic, to: fraud-engine, label: consume, kind: consume, flow: payment-events }
+    - { id: orders-to-analytics, from: orders-topic, to: analytics, label: sink, kind: stream, flow: order-events }
+    - { id: payments-to-analytics, from: payments-topic, to: analytics, label: sink, kind: stream, flow: payment-events }
+    - { id: registry-to-orders, from: schema-registry, to: orders-topic, label: schemas, kind: control, flow: control, direction: none }
+    - { id: monitor-to-orders, from: stream-monitor, to: orders-topic, label: lag, kind: read, flow: control, direction: none }
+  annotations:
+    - { id: contract-note, kind: note, text: Producers remain compatible with the previous two schema versions., anchor: schema-registry }
+views:
+  - id: backbone
+    title: Commerce Event Backbone
+    layout: { direction: right, spacing: relaxed }
+    showLegend: true
+

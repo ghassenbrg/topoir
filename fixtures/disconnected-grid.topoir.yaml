@@ -1,0 +1,17 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata: { name: disconnected-grid, title: Disconnected Grid Fixture }
+model:
+  groups:
+    - id: services
+      kind: logical
+      layout: { mode: grid, columns: 3 }
+  nodes:
+    - { id: alpha, kind: service, group: services }
+    - { id: beta, kind: service, group: services }
+    - { id: gamma, kind: service, group: services }
+    - { id: delta, kind: service, group: services }
+    - { id: epsilon, kind: service, group: services }
+    - { id: zeta, kind: service, group: services }
+    - { id: external, kind: external-system }
+

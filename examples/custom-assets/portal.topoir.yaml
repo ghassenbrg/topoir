@@ -1,0 +1,21 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata: { name: customer-payments, title: A familiar product. A clear service boundary. }
+model:
+  groups:
+    - { id: experience, kind: external-zone, label: Customer experience, order: 0 }
+    - { id: platform, kind: system, label: Payments platform, order: 1 }
+  nodes:
+    - { id: portal, kind: client, label: Payment portal, group: experience, visual: { shape: image, asset: custom:payment-portal } }
+    - { id: payment, kind: api, label: Payments API, group: platform, technology: go, order: 0 }
+    - { id: ledger, kind: database, label: Ledger, group: platform, technology: postgresql, order: 1 }
+  edges:
+    - { id: checkout, from: portal, to: payment, kind: request, label: Submit payment, emphasis: primary }
+    - { id: record, from: payment, to: ledger, kind: write, label: Record transaction }
+views:
+  - id: overview
+    theme: executive
+    design:
+      composition: swimlanes
+      audience: presentation
+      takeaway: Product imagery stays local; TopoIR measures and embeds it before layout.

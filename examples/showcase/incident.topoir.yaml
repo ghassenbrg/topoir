@@ -1,0 +1,35 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: producer-exhaustion
+  title: One shared producer. A cascading failure.
+model:
+  groups:
+    - { id: edge, kind: external-zone, label: Traffic, order: 0 }
+    - { id: runtime, kind: kubernetes-cluster, label: Checkout runtime, order: 1 }
+    - { id: control, kind: logical, label: Recovery & signals, order: 2 }
+  nodes:
+    - { id: requests, kind: client, group: edge, label: Incoming requests, icon: 'lucide:users-round', order: 0 }
+    - { id: producer, kind: service, group: runtime, label: Shared producer, description: Lock held during broker retry, technology: java, visual: { status: failure, badge: ROOT CAUSE }, order: 1 }
+    - { id: pool, kind: queue, group: runtime, label: Pool exhausted, description: No producer available, visual: { status: failure }, order: 2 }
+    - { id: threads, kind: worker, group: runtime, label: Thread starvation, description: Request workers wait, visual: { status: warning, replicas: 32 }, order: 3 }
+    - { id: timeout, kind: api, group: control, label: Health check timeout, description: Probe shares the worker pool, visual: { status: warning }, order: 4 }
+    - { id: restart, kind: pod, group: control, label: Pod restart, description: Temporary recovery only, technology: kubernetes, order: 5 }
+  edges:
+    - { id: incoming, from: requests, to: producer, label: Traffic surge, emphasis: primary }
+    - { id: blocked, from: producer, to: pool, label: Waiters accumulate, status: failure }
+    - { id: starvation, from: pool, to: threads, status: failure }
+    - { id: unhealthy, from: threads, to: timeout, label: Probe deadline, status: warning }
+    - { id: recycle, from: timeout, to: restart, label: Liveness fails, status: warning }
+  annotations:
+    - { id: mitigation, anchor: producer, kind: warning, text: 'Fix the shared lock; isolate probe capacity. Restarts hide the symptom, not the cause.' }
+views:
+  - id: overview
+    theme: dark-engineering
+    layout: { direction: down, spacing: compact, aspectRatio: 1.3 }
+    design:
+      composition: swimlanes
+      audience: engineering
+      takeaway: A retry lock turns broker latency into a service-wide outage.
+      focus: [producer]
+      story: [incoming, blocked, starvation, unhealthy, recycle]

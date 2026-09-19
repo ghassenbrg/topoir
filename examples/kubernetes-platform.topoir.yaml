@@ -1,0 +1,49 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: kubernetes-platform
+  title: Internal Developer Platform
+  description: Ingress, workloads, identity, data services, and cross-namespace traffic.
+model:
+  groups:
+    - { id: clients, kind: external-zone, label: Clients, layout: { mode: column } }
+    - { id: cluster, kind: kubernetes-cluster, label: Production Kubernetes }
+    - { id: ingress-ns, kind: namespace, label: ingress-system, parent: cluster }
+    - { id: apps-ns, kind: namespace, label: applications, parent: cluster }
+    - { id: platform-ns, kind: namespace, label: platform-services, parent: cluster, layout: { mode: column } }
+    - { id: data-ns, kind: security-boundary, label: stateful-services, parent: cluster, layout: { mode: column } }
+  nodes:
+    - { id: browser, kind: client, label: Browser, group: clients }
+    - { id: mobile, kind: client, label: Mobile App, group: clients }
+    - { id: traefik, kind: gateway, label: Traefik Ingress, description: TLS and route policies, group: ingress-ns, technology: traefik }
+    - { id: frontend, kind: pod, label: Frontend Pods, description: 3 replicas, group: apps-ns }
+    - { id: backend, kind: pod, label: Backend API Pods, description: 4 replicas, group: apps-ns }
+    - { id: jobs, kind: worker, label: Background Jobs, description: autoscaled workers, group: apps-ns }
+    - { id: keycloak, kind: identity-provider, label: Keycloak, group: platform-ns, technology: keycloak }
+    - { id: feature-flags, kind: service, label: Feature Flags, group: platform-ns }
+    - { id: redis, kind: cache, label: Redis, group: data-ns, technology: redis }
+    - { id: postgres, kind: database, label: PostgreSQL, group: data-ns, technology: postgresql }
+    - { id: object-store, kind: object-storage, label: Object Storage, group: data-ns }
+  flows:
+    - { id: request, label: Request path, color: "#2563EB", style: solid }
+    - { id: identity, label: Identity, color: "#D97706", style: solid }
+    - { id: data, label: Data access, color: "#059669", style: solid }
+    - { id: async, label: Async work, color: "#C026D3", style: dashed }
+  edges:
+    - { id: browser-ingress, from: browser, to: traefik, label: HTTPS, kind: request, flow: request }
+    - { id: mobile-ingress, from: mobile, to: traefik, label: HTTPS, kind: request, flow: request }
+    - { id: ingress-frontend, from: traefik, to: frontend, label: app route, kind: request, flow: request }
+    - { id: ingress-backend, from: traefik, to: backend, label: API route, kind: request, flow: request }
+    - { id: frontend-backend, from: frontend, to: backend, label: JSON API, kind: request, flow: request }
+    - { id: backend-keycloak, from: backend, to: keycloak, label: OIDC, kind: authenticate, flow: identity }
+    - { id: backend-flags, from: backend, to: feature-flags, label: evaluate, kind: read, flow: request }
+    - { id: backend-redis, from: backend, to: redis, label: sessions, kind: read, flow: data }
+    - { id: backend-postgres, from: backend, to: postgres, label: SQL, kind: write, flow: data }
+    - { id: backend-jobs, from: backend, to: jobs, label: enqueue, kind: async, flow: async }
+    - { id: jobs-postgres, from: jobs, to: postgres, label: update, kind: write, flow: data }
+    - { id: jobs-storage, from: jobs, to: object-store, label: artifacts, kind: write, flow: data }
+views:
+  - id: deployment
+    title: Internal Developer Platform — Deployment
+    layout: { direction: right, spacing: normal }
+    showLegend: true

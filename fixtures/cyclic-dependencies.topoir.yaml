@@ -1,0 +1,16 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata: { name: cyclic-dependencies, title: Cyclic Dependencies Fixture }
+model:
+  groups:
+    - { id: services, kind: logical }
+  nodes:
+    - { id: api, kind: api, group: services }
+    - { id: catalog, kind: service, group: services }
+    - { id: inventory, kind: service, group: services }
+    - { id: pricing, kind: service, group: services }
+  edges:
+    - { id: api-catalog, from: api, to: catalog, label: products }
+    - { id: catalog-inventory, from: catalog, to: inventory, label: stock }
+    - { id: inventory-pricing, from: inventory, to: pricing, label: price }
+    - { id: pricing-catalog, from: pricing, to: catalog, label: refresh }

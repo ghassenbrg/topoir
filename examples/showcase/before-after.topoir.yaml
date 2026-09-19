@@ -1,0 +1,23 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata: { name: decouple-delivery, title: Decouple delivery from checkout. }
+model:
+  groups:
+    - { id: before, kind: system, label: 'BEFORE / synchronous dependency', order: 0 }
+    - { id: after, kind: system, label: 'AFTER / durable handoff', order: 1 }
+  nodes:
+    - { id: api-old, kind: api, label: Checkout API, group: before, order: 0 }
+    - { id: delivery-old, kind: service, label: Delivery service, group: before, order: 1, visual: { status: failure, badge: BLOCKS CHECKOUT } }
+    - { id: database-old, kind: database, label: Delivery records, group: before, order: 2 }
+    - { id: api-new, kind: api, label: Checkout API, group: after, order: 0 }
+    - { id: queue-new, kind: queue, label: Durable event queue, group: after, order: 1, visual: { status: success, badge: ACKNOWLEDGED HANDOFF } }
+    - { id: delivery-new, kind: worker, label: Delivery worker, group: after, order: 2 }
+  edges:
+    - { id: blocking, from: api-old, to: delivery-old, label: Wait for delivery, status: failure, emphasis: primary }
+    - { id: save, from: delivery-old, to: database-old, kind: write }
+    - { id: publish, from: api-new, to: queue-new, label: Publish event, kind: publish, status: success, emphasis: primary }
+    - { id: consume, from: queue-new, to: delivery-new, label: Retry independently, kind: consume, style: dashed }
+views:
+  - id: overview
+    theme: executive
+    design: { composition: comparison, audience: executive, takeaway: Delivery outages no longer hold the customer request open. }

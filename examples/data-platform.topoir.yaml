@@ -1,0 +1,57 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: data-platform
+  title: Lakehouse Data Platform
+model:
+  groups:
+    - { id: sources, kind: external-zone, label: Operational Sources, layout: { mode: column } }
+    - { id: platform, kind: cloud, label: Analytics Cloud }
+    - { id: ingestion, kind: deployment, label: Ingestion, parent: platform, layout: { mode: column } }
+    - { id: processing, kind: deployment, label: Processing, parent: platform, layout: { mode: column } }
+    - { id: lakehouse, kind: security-boundary, label: Governed Lakehouse, parent: platform, layout: { mode: column } }
+    - { id: consumers, kind: logical, label: Data Consumers, layout: { mode: column } }
+  nodes:
+    - { id: orders-db, kind: database, label: Orders DB, group: sources }
+    - { id: crm, kind: external-system, label: CRM, group: sources }
+    - { id: clickstream, kind: stream, label: Clickstream, group: sources }
+    - { id: cdc, kind: service, label: CDC Connectors, group: ingestion }
+    - { id: event-bus, kind: stream, label: Ingestion Bus, group: ingestion }
+    - { id: batch-loader, kind: worker, label: Batch Loader, group: ingestion }
+    - { id: stream-jobs, kind: worker, label: Stream Processing, group: processing }
+    - { id: batch-jobs, kind: worker, label: Batch Transformations, group: processing }
+    - { id: catalog, kind: service, label: Data Catalog, group: processing }
+    - { id: raw-zone, kind: object-storage, label: Raw Zone, group: lakehouse }
+    - { id: curated-zone, kind: object-storage, label: Curated Tables, group: lakehouse }
+    - { id: warehouse, kind: database, label: SQL Warehouse, group: lakehouse }
+    - { id: bi, kind: client, label: BI Analysts, group: consumers }
+    - { id: notebooks, kind: client, label: Data Science, group: consumers }
+    - { id: features, kind: service, label: Feature Service, group: consumers }
+  flows:
+    - { id: realtime, label: Real-time, color: "#C026D3", style: dashed }
+    - { id: batch, label: Batch, color: "#2563EB", style: solid }
+    - { id: query, label: Query and serving, color: "#059669", style: solid }
+    - { id: governance, label: Governance, color: "#D97706", style: dotted }
+  edges:
+    - { id: orders-cdc, from: orders-db, to: cdc, label: WAL, kind: stream, flow: realtime }
+    - { id: crm-loader, from: crm, to: batch-loader, label: export, kind: data, flow: batch }
+    - { id: clickstream-bus, from: clickstream, to: event-bus, label: events, kind: publish, flow: realtime }
+    - { id: cdc-bus, from: cdc, to: event-bus, label: changes, kind: publish, flow: realtime }
+    - { id: bus-stream, from: event-bus, to: stream-jobs, label: consume, kind: consume, flow: realtime }
+    - { id: loader-raw, from: batch-loader, to: raw-zone, label: parquet, kind: write, flow: batch }
+    - { id: raw-batch, from: raw-zone, to: batch-jobs, label: read, kind: read, flow: batch }
+    - { id: stream-curated, from: stream-jobs, to: curated-zone, label: merge, kind: write, flow: realtime }
+    - { id: batch-curated, from: batch-jobs, to: curated-zone, label: transform, kind: write, flow: batch }
+    - { id: curated-warehouse, from: curated-zone, to: warehouse, label: tables, kind: data, flow: query }
+    - { id: warehouse-bi, from: warehouse, to: bi, label: SQL, kind: read, flow: query }
+    - { id: curated-notebooks, from: curated-zone, to: notebooks, label: Spark, kind: read, flow: query }
+    - { id: curated-features, from: curated-zone, to: features, label: materialize, kind: data, flow: query }
+    - { id: catalog-curated, from: catalog, to: curated-zone, label: lineage, kind: control, flow: governance, direction: none }
+  annotations:
+    - { id: governance-note, kind: note, text: Catalog policies and lineage apply to every curated dataset., anchor: catalog }
+views:
+  - id: lakehouse
+    title: Lakehouse Data Platform
+    layout: { direction: right, spacing: relaxed }
+    showLegend: true
+

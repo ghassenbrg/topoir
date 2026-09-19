@@ -1,0 +1,24 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata: { name: system-pattern, title: A practical system design pattern }
+model:
+  nodes:
+    - { id: clients, kind: client, label: Clients, icon: 'lucide:smartphone', order: 0 }
+    - { id: edge, kind: gateway, label: Edge & API gateway, description: TLS · routing · rate limits, order: 1 }
+    - { id: services, kind: service, label: Stateless services, description: Scale compute independently, visual: { replicas: 3 }, order: 2 }
+    - { id: cache, kind: cache, label: Cache, technology: redis, order: 3 }
+    - { id: database, kind: database, label: Source of truth, technology: postgresql, order: 4 }
+    - { id: queue, kind: queue, label: Background work, technology: rabbitmq, order: 3 }
+    - { id: workers, kind: worker, label: Workers, description: Retry · isolate · complete, order: 4 }
+  edges:
+    - { id: request, from: clients, to: edge, emphasis: primary }
+    - { id: serve, from: edge, to: services, emphasis: primary }
+    - { id: cached, from: services, to: cache, label: Fast reads, kind: read }
+    - { id: durable, from: cache, to: database, label: Cache miss, kind: read }
+    - { id: async, from: services, to: queue, label: Async, kind: async, style: dashed }
+    - { id: consume, from: queue, to: workers, kind: consume }
+views:
+  - id: overview
+    theme: whiteboard
+    layout: { direction: down, spacing: compact }
+    design: { composition: layers, audience: presentation, takeaway: Keep the request path short. Move slow work behind a queue., focus: [services] }
