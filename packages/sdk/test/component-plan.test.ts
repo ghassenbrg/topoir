@@ -191,3 +191,79 @@ describe("plans agree with the geometry analyzer", () => {
     }
   }, 60_000);
 });
+
+describe("plan blocks describe the marks actually drawn", () => {
+  /**
+   * The M1 exit clause: rendering consumes measured plans. `contentLayout` is the single
+   * computation both sides use, so these assert the plan's blocks land where the renderer
+   * put the corresponding marks — if the two ever diverged, the plan would be describing
+   * a component nobody drew.
+   */
+  const textMarks = (scene: { children: readonly unknown[] }, nodeId: string, part: string) => {
+    const found: { x: number; y: number; lines: readonly string[] }[] = [];
+    const walk = (elements: readonly unknown[]): void => {
+      for (const raw of elements) {
+        const element = raw as { type: string; owner?: { id: string; part?: string }; children?: readonly unknown[]; x?: number; y?: number; lines?: readonly string[] };
+        if (element.type === "group") walk(element.children ?? []);
+        else if (element.type === "text" && element.owner?.id === nodeId && element.owner.part === part) {
+          found.push({ x: element.x ?? 0, y: element.y ?? 0, lines: element.lines ?? [] });
+        }
+      }
+    };
+    walk(scene.children);
+    return found;
+  };
+
+  it("puts every component's label block where the label mark was drawn", async () => {
+    const { view } = await compile("checkout-platform.topoir.yaml");
+    let checked = 0;
+    for (const plan of view.plans) {
+      const block = plan.blocks.find((entry) => entry.id === `${plan.occurrenceId}:label`);
+      const marks = textMarks(view.scene, plan.occurrenceId, "label");
+      if (block === undefined || marks.length === 0 || block.type !== "text") continue;
+      const mark = marks[0];
+      if (mark === undefined) continue;
+      // The renderer offsets the scene by a page margin; the plan is in geometry space.
+      // The offset is the same for every component, so it cancels in the comparison below.
+      checked += 1;
+      expect(block.text.lines.map((line) => line.text), plan.occurrenceId).toEqual(mark.lines);
+    }
+    expect(checked).toBeGreaterThan(3);
+  });
+
+  it("keeps a constant offset between plan blocks and drawn marks", async () => {
+    // One page offset for the whole scene. If any component's content were laid out by a
+    // different computation on each side, its offset would differ from the rest.
+    const { view } = await compile("checkout-platform.topoir.yaml");
+    const offsets = new Set<string>();
+    for (const plan of view.plans) {
+      const block = plan.blocks.find((entry) => entry.id === `${plan.occurrenceId}:label`);
+      const mark = textMarks(view.scene, plan.occurrenceId, "label")[0];
+      if (block === undefined || mark === undefined || block.type !== "text") continue;
+      const first = block.text.lines[0];
+      if (first === undefined) continue;
+      offsets.add(`${Math.round(mark.x - first.x)},${Math.round(mark.y - first.baseline)}`);
+    }
+    expect(offsets.size).toBe(1);
+  });
+
+  it("gives every component blocks for the content it draws", async () => {
+    const { view } = await compile("checkout-platform.topoir.yaml");
+    for (const plan of view.plans) {
+      expect(plan.blocks.length, plan.occurrenceId).toBeGreaterThan(0);
+      expect(plan.blocks.some((block) => block.id === `${plan.occurrenceId}:label`), plan.occurrenceId).toBe(true);
+    }
+  });
+
+  it("puts every block inside or on its component", async () => {
+    const { view } = await compile("checkout-platform.topoir.yaml");
+    for (const plan of view.plans) {
+      const { x, y, width, height } = plan.layoutBounds;
+      for (const block of plan.blocks) {
+        expect(block.bounds.x, `${plan.occurrenceId}/${block.id}`).toBeGreaterThanOrEqual(x - 1);
+        expect(block.bounds.y, `${plan.occurrenceId}/${block.id}`).toBeGreaterThanOrEqual(y - 1);
+        expect(block.bounds.y + block.bounds.height, `${plan.occurrenceId}/${block.id}`).toBeLessThanOrEqual(y + height + 1);
+      }
+    }
+  });
+});

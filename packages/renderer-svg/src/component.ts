@@ -1,4 +1,4 @@
-import { assetReferences, nodeShape, type MeasuredNode, type GeometryNode, type Point, type TopoIRTheme } from "@topoir/core";
+import { assetOrigin, assetReferences, contentLayout, nodeShape, type MeasuredNode, type GeometryNode, type Point, type TopoIRTheme } from "@topoir/core";
 import type { AssetRegistry } from "@topoir/assets";
 import type { SceneElement, SceneGroup, SceneRect } from "./scene.js";
 import { iconScene } from "./icons.js";
@@ -15,9 +15,7 @@ export function nodeComponent(node: MeasuredNode, geometry: GeometryNode, offset
   const x = geometry.x + offset.x, y = geometry.y + offset.y, w = geometry.width, h = geometry.height;
   // Drawn from the measured badge, so the strip the node was sized for is the strip drawn.
   const badge = node.badgeText;
-  const badgeHeight = badge ? badge.height + 12 : 0;
   const showPorts = node.visual?.portLabels === "inside" && node.ports.length > 0;
-  const portPanelHeight = showPorts ? 12 + node.ports.reduce((sum, port) => sum + Math.max(28, (port.labelText?.height ?? 0) + 12), 0) : 0;
   const vertical = shape === "icon" || shape === "image";
   const fill = basePaint.fill;
   const base: SceneRect = { type: "rect", owner: own("body"), x, y, width: w, height: h, rx: shape === "pill" ? h / 2 : theme.node.radius, fill, stroke: accent, strokeWidth: focus ? 2.6 : 1.4 };
@@ -48,27 +46,27 @@ export function nodeComponent(node: MeasuredNode, geometry: GeometryNode, offset
     .map((reference) => assets.resolve(reference, accent))
     .filter((value): value is NonNullable<typeof value> => value !== undefined);
   const asset = resolvedAssets[0] ?? assets.resolve(node.kind, accent);
-  const iconBoxWidth = node.imageSize?.width ?? (shape === "image" ? w - 32 : size);
-  const iconBoxHeight = node.imageSize?.height ?? (shape === "image" ? Math.max(size, h - node.labelText.height - (node.descriptionText?.height ?? 0) - 48 - badgeHeight) : size);
-  const iconX = vertical ? x + (w - iconBoxWidth) / 2 : x + theme.spacing.nodePaddingX + (shape === "diamond" ? 14 : 0);
-  const iconY = vertical ? y + 14 : y + (h - badgeHeight - portPanelHeight - size) / 2 + (shape === "cylinder" ? 6 : 0);
   const displayedAssets = resolvedAssets.length ? resolvedAssets : asset ? [asset] : [];
-  const assetIconWidth = displayedAssets.length > 1 ? size : iconBoxWidth;
-  const assetStrip = displayedAssets.length * assetIconWidth + Math.max(0, displayedAssets.length - 1) * 8;
-  const stripX = vertical ? x + (w - assetStrip) / 2 : iconX;
+  // Placement comes from the shared layout, in the component's local space. The renderer
+  // offsets it; it does not re-derive it. That is what keeps the plan's description of a
+  // component and the marks actually drawn from being two different things.
+  const layout = contentLayout(node, theme, displayedAssets.length);
+  const iconX = x + layout.iconOrigin.x;
+  const iconY = y + layout.iconOrigin.y;
+  const { width: iconBoxWidth, height: iconBoxHeight } = layout.iconBox;
+  const assetIconWidth = layout.assetIconWidth;
   if (displayedAssets.length) {
     for (const [index, resolved] of displayedAssets.entries()) {
-      const assetX = stripX + index * (assetIconWidth + 8);
+      const origin = assetOrigin(layout, index);
+      const assetX = x + origin.x;
       const backplate = theme.language?.assetBackplate;
       if (resolved.collection === "devicon" && backplate !== undefined) children.push({ type: "rect", owner: own("asset-backplate"), x: assetX - 4, y: iconY - 4, width: assetIconWidth + 8, height: iconBoxHeight + 8, rx: 6, fill: backplate });
       children.push({ type: "image", owner: own(`asset:${resolved.name}`), x: assetX, y: iconY, width: assetIconWidth, height: iconBoxHeight, href: resolved.dataUri, title: resolved.name });
     }
   } else children.push({ ...iconScene(node.kind, iconX, iconY, size, accent), owner: own("icon") });
-  const totalTextHeight = node.labelText.height + (node.descriptionText === undefined ? 0 : 6 + node.descriptionText.height);
-  const textTop = vertical ? iconY + iconBoxHeight + 12 : y + (h - badgeHeight - portPanelHeight - totalTextHeight) / 2 + (shape === "cylinder" ? 6 : 0);
-  const textX = vertical ? x + w / 2 : iconX + Math.max(size, displayedAssets.length * (size + 8) - 8) + 12;
-  children.push({ type: "text", owner: own("label"), x: textX, y: textTop + theme.font.labelSize, lines: node.labelText.lines, lineHeight: node.labelText.lineHeight, fill: basePaint.text, fontSize: theme.font.labelSize, fontWeight: focus ? 700 : 600, ...(vertical ? { anchor: "middle" } : {}) });
-  if (node.descriptionText) children.push({ type: "text", owner: own("description"), x: textX, y: textTop + node.labelText.height + 6 + theme.font.descriptionSize, lines: node.descriptionText.lines, lineHeight: node.descriptionText.lineHeight, fill: theme.canvas.muted, fontSize: theme.font.descriptionSize, ...(vertical ? { anchor: "middle" } : {}) });
+  const textX = x + layout.textX;
+  children.push({ type: "text", owner: own("label"), x: textX, y: y + layout.labelBaseline, lines: node.labelText.lines, lineHeight: node.labelText.lineHeight, fill: basePaint.text, fontSize: theme.font.labelSize, fontWeight: focus ? 700 : 600, ...(vertical ? { anchor: "middle" } : {}) });
+  if (node.descriptionText && layout.descriptionBaseline !== undefined) children.push({ type: "text", owner: own("description"), x: textX, y: y + layout.descriptionBaseline, lines: node.descriptionText.lines, lineHeight: node.descriptionText.lineHeight, fill: theme.canvas.muted, fontSize: theme.font.descriptionSize, ...(vertical ? { anchor: "middle" } : {}) });
   if (showPorts) {
     // Drawn from the same measured slots that layout pinned the ports to.
     for (const port of node.ports) {
@@ -78,13 +76,12 @@ export function nodeComponent(node: MeasuredNode, geometry: GeometryNode, offset
       children.push({ type: "text", owner: own(`port:${port.id}`), x: x + slot.x + slot.width / 2, y: y + slot.y + slot.height / 2 + theme.font.descriptionSize * 0.36, lines: port.labelText?.lines ?? [port.label], lineHeight: port.labelText?.lineHeight ?? theme.font.descriptionSize * 1.2, fill: basePaint.text, fontSize: theme.font.descriptionSize, fontWeight: 600, anchor: "middle" });
     }
   }
-  if (badge) {
+  if (badge && layout.badgeStrip !== undefined && layout.badgeBaseline !== undefined) {
     // A one-line badge keeps exactly the strip and baseline it has always had; only a
     // wrapped badge grows the strip, so existing output is unchanged.
-    const stripHeight = badge.height + 7;
-    const stripY = y + h - stripHeight - 7;
-    children.push({ type: "rect", owner: own("badge"), x: x + 12, y: stripY, width: w - 24, height: stripHeight, rx: 4, fill: theme.canvas.background });
-    children.push({ type: "text", owner: own("badge"), x: x + w / 2, y: stripY + badge.lineHeight + 2, lines: badge.lines, lineHeight: badge.lineHeight, fontSize: 10, fontWeight: 600, fill: accent, anchor: "middle" });
+    const strip = layout.badgeStrip;
+    children.push({ type: "rect", owner: own("badge"), x: x + strip.x, y: y + strip.y, width: strip.width, height: strip.height, rx: 4, fill: theme.canvas.background });
+    children.push({ type: "text", owner: own("badge"), x: x + w / 2, y: y + layout.badgeBaseline, lines: badge.lines, lineHeight: badge.lineHeight, fontSize: 10, fontWeight: 600, fill: accent, anchor: "middle" });
   }
   if (step !== undefined) {
     children.push({ type: "circle", owner: own("step"), cx: x + 12, cy: y + 12, radius: 12, fill: accent });

@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-19. This file is the live execution ledger for the design program.
 
-**Program state: in progress. M0 complete. T09 done; M1 gate NOT met — see the M1 assessment. Next task: T08 carried work (renderer draws from plan blocks), then T10.**
+**Program state: in progress. M0 and M1 complete. Next task: T10. Current milestone: M2 (T10–T15).**
 
 The full review previously verified `bc64cf2`: 91 tests in 15 files passed; 240/240 synthetic cases compiled without hard geometry defects; 220/240 passed the selected defect counters; six reference candidates were deterministic with no approved parity recorded. These are historical baseline observations, not evidence that the tasks below are implemented. The design-writing task added documents/examples only.
 
@@ -18,7 +18,7 @@ Allowed task states: `not_started`, `in_progress`, `implemented_pending_gate`, `
 | T05 | M1 | complete | ComponentPlan/blocks/attachments/disposition, SceneDocument and Medium in core; renderer re-exports; three-family fixtures and dependency-direction test. Interfaces only. See session entry. |
 | T06 | M1 | complete | Font registry with face hashes, fallback chains and content-keyed caching; one resolved set reaches measurement, SVG and PNG; `TOP332_GLYPH_NOT_AVAILABLE`. See session entry. |
 | T07 | M1 | complete | Block measurement engine, bounded width negotiation, true silhouettes and ink bounds, attachment derivation, content accounting. Not yet wired into the pipeline — that is T08. See session entry. |
-| T08 | M1 | complete | All three acceptance criteria met and verified. `ComponentPlan.blocks` is still empty and the renderer computes block positions inline — recorded as carried work, see session entry. |
+| T08 | M1 | complete | All acceptance criteria met. Carried work closed: `contentLayout` is the single placement computation, plans carry populated blocks, and the renderer derives nothing itself. |
 | T09 | M1 | complete | Scene QA on final ink: representation, attribution, clipping, real-backdrop contrast, disposition. Found 10 genuinely defective generated cases nothing had reported. See session entry. |
 | T10 | M2 | not_started | |
 | T11 | M2 | not_started | |
@@ -56,7 +56,7 @@ Allowed task states: `not_started`, `in_progress`, `implemented_pending_gate`, `
 | Gate | State | Required evidence |
 | --- | --- | --- |
 | M0 trustworthy baseline | complete | T00–T04 complete; all 12 reproduced review defects fixed or explicitly diagnosed; 189 tests pass; benchmark claims match measured evidence. See the M0 gate entry. |
-| M1 shared components/scene | not_started | Single measured contract and complete visible accounting |
+| M1 shared components/scene | complete | One measured placement computation behind both plan and drawing; full scene ownership; two-directional content accounting. See the M1 gate entry. |
 | M2 versioned presentation | not_started | Schema/migration/constraints/registry and examples agree |
 | M3 architecture quality | not_started | T20 corpus and actual review decisions |
 | M4 multi-family compiler | not_started | T25 architecture/process/interaction acceptance |
@@ -907,3 +907,75 @@ are also ready if the presentation rewrite is deferred.
 **Remaining defects.** The ten generated cases above; the dark-canvas cascade defect class
 for T13; `examples/rendered/showcase/custom-assets.png` still stale from before T01.
 Reference parity remains **0/6 unreviewed**.
+
+### T08 carried work — one placement computation — 2026-09-20
+
+**Closes the item recorded as outstanding in the T08 slice-2 entry and the M1 assessment.**
+
+Baseline commit `4684360` (T09).
+
+**What was outstanding.** `ComponentPlan.blocks` was empty and `nodeComponent` computed
+block positions inline. The plan could say a component *has* a label but not where it is,
+so a quality check could not ask whether the label fits inside its card without re-deriving
+the whole layout — and any future plan-based renderer would have been a second opinion
+about placement.
+
+**What changed.** The placement arithmetic moved out of the renderer into
+`core/src/components/content-layout.ts`, in the component's local coordinate space:
+
+- `contentLayout(node, theme, assetCount)` returns the icon box and origin, the asset strip
+  geometry, the text origin and baselines, the badge strip and the port panel height.
+- `nodeComponent` places marks at those coordinates offset by the component's position. It
+  derives nothing itself; an audit shows the only arithmetic left is `x + layout.textX`.
+- `contentBlocksFor` turns the same layout into measured blocks, and `planForNode` offsets
+  them to the placed bounds. Plans now carry 2–3 populated blocks each; none is empty.
+
+`assetCount` is passed from the SDK as the number of assets **actually drawn**, because an
+unresolved role occupies a slot in measurement but draws nothing, and the strip width
+decides where the label starts.
+
+**Verification:**
+
+| Command | Outcome |
+| --- | --- |
+| `pnpm check` | build + typecheck clean; **323 tests in 28 files passed** (319 after T09) |
+| render comparison | **all 20 byte-identical** — the extraction changed no output |
+| renderer measurement audit | no component content measured in the renderer; the two remaining `measure` calls are scene-QA ink bounds and post-layout chrome through the shared block engine |
+
+Four new assertions check the plan against the drawing rather than assuming they agree:
+every component's label block carries the same lines as the drawn label mark; **the offset
+between plan blocks and drawn marks is the same single value for every component**, which
+would break immediately if any component's content were laid out by different code on each
+side; every component has blocks for what it draws; and every block sits inside its
+component.
+
+### M1 gate — shared components and complete scene — 2026-09-20
+
+**Gate: M1. State: complete.**
+
+Exit criterion: *"all rendering consumes measured plans; the complete scene has semantic
+ownership and independently verified visible-content accounting."*
+
+| Clause | Evidence |
+| --- | --- |
+| All rendering consumes measured plans | `contentLayout` is the single placement computation; plans are built from it and the renderer places from it. Nothing in the renderer re-derives measurement. Asserted by the constant-offset test |
+| The complete scene has semantic ownership | 0 unowned marks across all 23 scenes in the published corpus, asserted corpus-wide |
+| Independently verified visible-content accounting | Two-directional: `TOP450` for declared facts the drawing omits, `TOP451` for ink nothing explains, plus per-component dispositions cross-checked against view metrics |
+
+**Precise scope, so the claim is not read wider than it is.** The renderer calls
+`contentLayout` directly rather than iterating an assembled `plan.blocks` array. The
+*computation* is shared — which is what removes the duplicate-description defect — but the
+renderer does not literally read the plan object. Groups, annotations and edge labels
+consume measured values from `measureView` and have never been re-measured in the renderer;
+they do not have `ComponentPlan`s of their own. Neither of those is a defect today, and
+both are noted so a later task is not misled about what exists.
+
+**Tally across M0 and M1:** tests 91 → 323. All 20 example and showcase renders are
+byte-identical to the goldens, with one deliberate, inspected and explained exception in
+T01 (`paired-regions.png`, one node widened 1.3px so its badge strip contains its own text).
+
+**Outstanding gate, unchanged and not claimed:** reference parity is **0/6, `unreviewed`**.
+No human visual review has been obtained. `--require-parity` fails, correctly.
+
+**Next ready task: T10** (v1alpha2 envelope and family registry), which opens M2. Its
+dependencies T04 and T05 are complete.

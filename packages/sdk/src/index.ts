@@ -298,7 +298,12 @@ export class TopoIRCompiler {
         // Only the rectangle: a plan's bounds are geometry, not a copy of the whole
         // geometry node, or the plan quietly carries a second copy of its ports.
         const bounds = { x: placed.x, y: placed.y, width: placed.width, height: placed.height };
-        return [planForNode(node, { theme, bounds }, incident.get(node.id) ?? 2)];
+        // The count of assets actually drawn, which is what the renderer lays out against:
+        // an unresolved role occupies a slot in measurement but draws nothing, and the
+        // strip width decides where the label starts.
+        const drawn = (node.assetRoles ?? []).filter((role) => assets.resolve(role.reference) !== undefined).length;
+        const fallback = drawn === 0 && assets.resolve(node.kind) !== undefined ? 1 : drawn;
+        return [planForNode(node, { theme, bounds }, incident.get(node.id) ?? 2, fallback)];
       });
       const compiled: CompiledView = {
         view,

@@ -3,6 +3,8 @@ import { nodeShape, type TopoIRTheme } from "../theme.js";
 import type { MeasuredBlock } from "./blocks.js";
 import type { AttachmentSite, ComponentPlan, ContentDisposition, Silhouette } from "./plan.js";
 import { componentInk, rowAttachments, sideAttachments } from "./negotiate.js";
+import { assetOrigin, contentLayout } from "./content-layout.js";
+import type { MeasuredText } from "../ir.js";
 
 /**
  * Compiles a measured node into a `ComponentPlan` (T08).
@@ -120,17 +122,88 @@ export function dispositionsFor(node: MeasuredNode): readonly ContentDisposition
 }
 
 /**
+ * The content blocks of a component, at the positions it is actually drawn with.
+ *
+ * Built from `contentLayout`, the same function the renderer places marks from, so the
+ * plan is not a second opinion about where anything is. Coordinates are local to the
+ * component; `planForNode` offsets them to its placed bounds.
+ */
+export function contentBlocksFor(node: MeasuredNode, theme: TopoIRTheme, assetCount: number): readonly MeasuredBlock[] {
+  const layout = contentLayout(node, theme, assetCount);
+  const blocks: MeasuredBlock[] = [];
+  const shaped = (id: string, text: MeasuredText, x: number, baseline: number, fontSize: number, weight: number): MeasuredBlock => {
+    const bounds = { x, y: round(baseline - fontSize), width: text.width, height: text.height };
+    return {
+      type: "text",
+      id,
+      contentId: id,
+      sizing: { min: { width: text.width, height: text.height }, preferred: { width: text.width, height: text.height } },
+      bounds,
+      inkBounds: bounds,
+      text: {
+        source: text.source,
+        lines: text.lines.map((line, index) => ({
+          text: line,
+          x,
+          baseline: round(baseline + index * text.lineHeight),
+          advance: text.width,
+          inkBounds: { x, y: round(baseline - fontSize + index * text.lineHeight), width: text.width, height: text.lineHeight },
+          continuesPrevious: false,
+        })),
+        fontFamily: theme.font.family,
+        fontSize,
+        fontWeight: weight,
+        lineHeight: text.lineHeight,
+        ascent: round(fontSize * 0.8),
+        descent: round(fontSize * 0.2),
+        direction: "ltr",
+      },
+    };
+  };
+
+  for (const [index, role] of (node.assetRoles ?? []).slice(0, assetCount).entries()) {
+    const origin = assetOrigin(layout, index);
+    const size = { width: layout.assetIconWidth, height: layout.iconBox.height };
+    blocks.push({
+      type: "asset",
+      id: `${node.id}:asset:${role.reference}`,
+      contentId: `${node.id}:asset:${role.reference}`,
+      sizing: { min: size, preferred: size },
+      bounds: { ...origin, ...size },
+      inkBounds: { ...origin, ...size },
+      role: role.reference,
+      intrinsic: role.size ?? size,
+      fit: "contain",
+      ...(role.size === undefined ? {} : { href: "resolved" }),
+    });
+  }
+
+  blocks.push(shaped(`${node.id}:label`, node.labelText, layout.textX, layout.labelBaseline, theme.font.labelSize, 600));
+  if (node.descriptionText !== undefined && layout.descriptionBaseline !== undefined) {
+    blocks.push(shaped(`${node.id}:description`, node.descriptionText, layout.textX, layout.descriptionBaseline, theme.font.descriptionSize, 400));
+  }
+  if (node.badgeText !== undefined && layout.badgeBaseline !== undefined) {
+    blocks.push(shaped(`${node.id}:badge`, node.badgeText, layout.badgeStrip?.x ?? 0, layout.badgeBaseline, 10, 600));
+  }
+  for (const port of node.ports) {
+    if (port.slot === undefined || port.labelText === undefined) continue;
+    blocks.push(shaped(`${node.id}:port:${port.id}`, port.labelText, port.slot.x, round(port.slot.y + port.slot.height / 2), theme.font.descriptionSize, 600));
+  }
+  return blocks;
+}
+
+/**
  * A `ComponentPlan` for a measured, placed node.
  *
- * `blocks` is intentionally empty for now: the legacy renderer still owns block placement,
- * and inventing block positions here that nothing draws from would be a second description
- * of the component — exactly the duplication the plan exists to remove. T08's later slice
- * moves placement into the plan and the renderer reads it.
+ * `blocks` carries the component's content at the positions the renderer draws it, built
+ * from the same `contentLayout` the renderer places from — one description of the
+ * component, not two.
  */
-export function planForNode(node: MeasuredNode, options: PlanOptions, incident = 2): ComponentPlan {
+export function planForNode(node: MeasuredNode, options: PlanOptions, incident = 2, assetCount?: number): ComponentPlan {
   const bounds = options.bounds ?? { x: 0, y: 0, width: node.width, height: node.height };
   const silhouette = silhouetteFor(node, options.theme, bounds);
-  const blocks: readonly MeasuredBlock[] = [];
+  const local = contentBlocksFor(node, options.theme, assetCount ?? node.assetRoles?.length ?? 0);
+  const blocks: readonly MeasuredBlock[] = local.map((block) => offsetBlock(block, bounds.x, bounds.y));
   return {
     id: `plan:${node.id}`,
     occurrenceId: node.id,
@@ -157,6 +230,16 @@ export function planForNode(node: MeasuredNode, options: PlanOptions, incident =
 /** Attachment sites derived from a node's visible route table, when it has one. */
 export function tableAttachments(node: MeasuredNode, table: MeasuredBlock, side: "east" | "west"): readonly AttachmentSite[] {
   return rowAttachments(table, side, node.id);
+}
+
+/** Moves a block and everything inside it into the component's placed position. */
+function offsetBlock(block: MeasuredBlock, dx: number, dy: number): MeasuredBlock {
+  const move = (rect: { x: number; y: number; width: number; height: number }) => ({ ...rect, x: round(rect.x + dx), y: round(rect.y + dy) });
+  const base = { ...block, bounds: move(block.bounds), inkBounds: move(block.inkBounds) };
+  if (base.type === "text") {
+    return { ...base, text: { ...base.text, lines: base.text.lines.map((line) => ({ ...line, x: round(line.x + dx), baseline: round(line.baseline + dy), inkBounds: move(line.inkBounds) })) } };
+  }
+  return base as MeasuredBlock;
 }
 
 function round(value: number): number {
