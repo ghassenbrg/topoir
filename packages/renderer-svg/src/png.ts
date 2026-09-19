@@ -1,9 +1,16 @@
 import { Resvg } from "@resvg/resvg-js";
-import { bundledFontFiles } from "./fonts.js";
+import { bundledFontFiles, fontFilesFor } from "./fonts.js";
+import type { ResolvedFontSet } from "@topoir/core";
 
 export interface PngOptions {
   readonly scale?: number;
   readonly background?: string;
+  /**
+   * The resolved font set measurement used. Passing it is what guarantees the rasterizer
+   * loads the same bytes layout was computed against; omitting it falls back to the
+   * default chain.
+   */
+  readonly fonts?: ResolvedFontSet;
 }
 
 export function renderPng(svg: string, options: PngOptions = {}): Uint8Array {
@@ -16,9 +23,9 @@ export function renderPng(svg: string, options: PngOptions = {}): Uint8Array {
     fitTo: { mode: "zoom", value: scale },
     font: {
       loadSystemFonts: false,
-      fontFiles: bundledFontFiles,
-      defaultFontFamily: "DejaVu Sans",
-      sansSerifFamily: "DejaVu Sans",
+      fontFiles: [...(options.fonts ? fontFilesFor(options.fonts) : bundledFontFiles)],
+      defaultFontFamily: options.fonts?.family ?? "DejaVu Sans",
+      sansSerifFamily: options.fonts?.family ?? "DejaVu Sans",
     },
   });
   const png = renderer.render().asPng();

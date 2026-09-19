@@ -4,12 +4,14 @@ import {
   analyzeContent,
   analyzeGeometry,
   analyzeVisibility,
-  fontDiagnostic,
+  bundledFontTextMeasurer,
+  fontSetDiagnostic,
+  glyphDiagnostic,
   intentDiagnostics,
   loadDocument,
   measureView,
   projectView,
-  resolveFont,
+  resolveFontSet,
   resolveTheme,
   type GeometryView,
   type LayoutEngine,
@@ -212,14 +214,13 @@ export class TopoIRCompiler {
         });
         continue;
       }
-      // A font the compiler cannot measure and embed is substituted, and the substitution
-      // is reported. `resolveTheme` has already put the resolved family on the theme, so
-      // measurement, the scene and the embedded faces all name the same thing.
+      // Fonts are resolved once, into one set, which measurement, the embedded SVG faces
+      // and the PNG rasterizer all consume. Three independent resolutions that happened to
+      // agree is not the same as one that provably does.
       const requestedFamily = typeof view.theme === "object" && view.theme !== null ? view.theme.font?.family : undefined;
-      if (requestedFamily !== undefined) {
-        const substitution = fontDiagnostic(resolveFont(requestedFamily));
-        if (substitution !== undefined) diagnostics.push(substitution);
-      }
+      const fontSet = resolveFontSet(requestedFamily);
+      const substitution = fontSetDiagnostic(fontSet);
+      if (substitution !== undefined) diagnostics.push(substitution);
       // Paint the view actually uses has to be readable and has to be real colour.
       const visibility = analyzeVisibility(view, theme);
       diagnostics.push(...visibility.diagnostics);
@@ -227,7 +228,14 @@ export class TopoIRCompiler {
       // "applied" from "ignored" without diffing two drawings.
       diagnostics.push(...intentDiagnostics(view));
 
-      const measured = measureView(view, theme, options.textMeasurer, (reference) => assets.resolve(reference));
+      const measurer = options.textMeasurer ?? bundledFontTextMeasurer(fontSet);
+      const measured = measureView(view, theme, measurer, (reference) => assets.resolve(reference));
+      // A character no resolved face can draw is rendered as a replacement box in both
+      // exports. Without this the caller sees a clean compile and a drawing full of tofu.
+      for (const [owner, text] of authoredText(view)) {
+        const missing = glyphDiagnostic(fontSet, owner, text);
+        if (missing !== undefined) diagnostics.push(missing);
+      }
       for (const node of measured.nodes) {
         const explicit = node.visual?.assets ?? [];
         if (explicit.length > 0 && node.visual?.asset !== undefined) diagnostics.push({ code: "TOP323_ASSET_OVERRIDDEN", severity: "warning", message: `Node ${node.id} sets both visual.asset and visual.assets; visual.assets is the complete list, so ${JSON.stringify(node.visual.asset)} is not rendered. Add it to visual.assets or remove it.` });
@@ -258,12 +266,12 @@ export class TopoIRCompiler {
       compiledViews.push(compiled);
 
       if (format === "svg" || format === "both") {
-        const svg = renderSvg(scene);
+        const svg = renderSvg(scene, fontSet);
         artifacts.push(createArtifact(view.id, "svg", svg, scene));
       }
       if (format === "png" || format === "both") {
-        const svg = renderSvg(scene);
-        const png = renderPng(svg, options.png);
+        const svg = renderSvg(scene, fontSet);
+        const png = renderPng(svg, { ...options.png, fonts: fontSet });
         artifacts.push(createArtifact(view.id, "png", png, scene, options.png?.scale ?? 1));
       }
     }
@@ -352,6 +360,23 @@ function pngDimensions(bytes: Uint8Array): { width: number; height: number } | u
   if (buffer.length < 24 || !buffer.subarray(0, 8).equals(signature)) return undefined;
   if (buffer.subarray(12, 16).toString("ascii") !== "IHDR") return undefined;
   return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
+}
+
+/** Every authored string a view will draw, with the owner to name in a diagnostic. */
+function authoredText(view: ViewGraph): readonly (readonly [string, string])[] {
+  const entries: (readonly [string, string])[] = [];
+  for (const node of view.nodes) {
+    entries.push([`node ${node.id}`, node.label]);
+    if (node.description !== undefined) entries.push([`node ${node.id}`, node.description]);
+    if (node.visual?.badge !== undefined) entries.push([`the badge of node ${node.id}`, node.visual.badge]);
+    for (const port of node.ports) entries.push([`port ${node.id}.${port.id}`, port.label]);
+  }
+  for (const group of view.groups) entries.push([`group ${group.id}`, group.label]);
+  for (const edge of view.edges) {
+    if (edge.label !== undefined) entries.push([`relationship ${edge.id}`, edge.label]);
+  }
+  for (const annotation of view.annotations) entries.push([`annotation ${annotation.id}`, annotation.text]);
+  return entries;
 }
 
 function hasErrors(diagnostics: readonly Diagnostic[]): boolean {

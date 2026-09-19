@@ -48,6 +48,7 @@ Do not parse message wording. Match `code`, then use `path` and `range` to edit 
 | `TOP322_ASSET_NOT_FOUND` | Discover the correct inventory ID; explicit `visual.asset` is an error, optional technology/icon fallback is a warning |
 | `TOP323_ASSET_OVERRIDDEN` | `visual.assets` is the complete ordered asset list for a component, so a separate `visual.asset` is not rendered; fold it into `visual.assets` or remove it |
 | `TOP330_FONT_UNAVAILABLE` | The requested `theme.font.family` is not one the compiler can measure and embed, so a supported family was used for measurement, for the scene and for the embedded faces. Use a supported family, or accept the substitution |
+| `TOP332_GLYPH_NOT_AVAILABLE` | Text uses characters no resolved font can draw, so they are painted as replacement boxes. The message names the owner and the code points. Use characters the resolved pack covers |
 | `TOP331_COLOR_INVALID` | A colour value is not one the compiler recognizes. The schema pattern admits strings that are not colours, such as a five- or seven-digit hex value or an arbitrary word; use a hex value or a supported colour name |
 | `TOP402_COMPOSITION_PORT_UNSUPPORTED` | Use topology/layers for explicit endpoint ports; experimental panels/sequence do not yet honor them |
 | `TOP412_RELATIONSHIP_DROPPED` | A declared relationship produced no route and is missing from the diagram; a layout backend lost it |

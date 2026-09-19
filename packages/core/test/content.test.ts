@@ -69,10 +69,24 @@ describe("layoutText word splitting", () => {
 
   it("splits grapheme clusters rather than code units", () => {
     // Each flag is a surrogate pair; splitting mid-pair would emit replacement characters.
+    // This tests the splitting logic specifically: DejaVu has no glyphs for regional
+    // indicators, so such a label would also raise TOP332_GLYPH_NOT_AVAILABLE (T06). That
+    // is a separate concern — wrapping must stay grapheme-safe for scripts the pack does
+    // cover, which the covered-script case below asserts.
     const flags = "🇩🇪🇫🇷🇪🇸🇮🇹🇵🇹🇳🇱🇧🇪🇦🇹🇵🇱🇸🇪";
     const result = layoutText(flags, 40, style, measurer, 12);
     expect(result.lines.join("")).toBe(flags);
     expect(result.lines.join("")).not.toContain("�");
+  });
+
+  it("splits a covered non-Latin script without losing characters", () => {
+    // Cyrillic is inside the DejaVu pack, so this exercises grapheme-safe splitting on
+    // text that genuinely renders rather than on code points that would be tofu anyway.
+    const cyrillic = "Расчётыиурегулированиемеждународныхплатежей";
+    const result = layoutText(cyrillic, 110, style, measurer, 12);
+    expect(result.disposition).toBe("rendered");
+    expect(result.lines.length).toBeGreaterThan(1);
+    expect(result.lines.join("")).toBe(cyrillic);
   });
 });
 

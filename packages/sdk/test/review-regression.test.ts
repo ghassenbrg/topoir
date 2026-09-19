@@ -451,3 +451,63 @@ describe("review regression: routing refinement", () => {
     }
   }, 180_000);
 });
+
+describe("review regression: resolved font resources", () => {
+  /**
+   * T06. Measurement, the SVG's embedded faces and the PNG rasterizer each resolved fonts
+   * independently. They agreed, but nothing proved it, and a drawing laid out with one set
+   * of metrics and rasterized with another is wrong in a way that "a PNG was produced"
+   * cannot detect. One resolved set now reaches all three.
+   */
+  it("embeds exactly the faces measurement resolved", async () => {
+    const { resolveFontSet, selectFace } = await import("@topoir/core");
+    const { result } = await compileFixture("long-label", { format: "both" });
+    const svg = result.artifacts.find((artifact) => artifact.format === "svg");
+    if (svg === undefined) throw new Error("no svg artifact");
+
+    const set = resolveFontSet(undefined);
+    const embedded = [...String(svg.content).matchAll(/@font-face\{font-family:'([^']+)';font-style:(\w+);font-weight:(\d+)/gu)].map(
+      (match) => ({ family: match[1], style: match[2], weight: Number(match[3]) }),
+    );
+    const resolved = set.chain.flatMap((pack) => pack.faces.map((face) => ({ family: face.family, style: face.style, weight: face.weight })));
+    expect(embedded).toEqual(resolved);
+    // And the family the scene declares is one of them.
+    expect(resolved.map((face) => face.family)).toContain(set.family);
+    expect(selectFace(set, 400)?.family).toBe(set.family);
+  });
+
+  it("produces byte-identical output on a warm and a cold resource cache", async () => {
+    // The caches are keyed on resolved content, so a hit must be indistinguishable from a
+    // miss. If they ever diverge, the first render of a process differs from the rest.
+    const source = await fixture("theme-dark-base");
+    const compiler = new TopoIRCompiler();
+    const first = await compiler.compile(source, { source: "a.yaml", format: "both" });
+    const second = await compiler.compile(source, { source: "a.yaml", format: "both" });
+    expect(second.artifacts.map((artifact) => artifact.sha256)).toEqual(first.artifacts.map((artifact) => artifact.sha256));
+  });
+
+  /**
+   * T06. A character the resolved pack cannot draw is rendered as a replacement box in
+   * both exports. Nothing reported it, so the caller saw a clean compile and a drawing
+   * full of tofu.
+   */
+  it("reports characters no resolved font can draw", async () => {
+    const document = JSON.stringify({
+      apiVersion: "topoir.dev/v1alpha1",
+      kind: "Architecture",
+      metadata: { name: "glyph-coverage" },
+      model: { nodes: [{ id: "a", kind: "service", label: "支払いサービス" }] },
+      views: [{ id: "overview", design: { composition: "architecture" } }],
+    });
+    const result = await new TopoIRCompiler().compile(document, { format: "svg" });
+    const reported = result.diagnostics.filter((diagnostic) => diagnostic.code === "TOP332_GLYPH_NOT_AVAILABLE");
+    expect(reported).toHaveLength(1);
+    expect(reported[0]?.message).toContain("node a");
+    expect(reported[0]?.message).toContain("U+652F");
+  });
+
+  it("says nothing about text the pack covers", async () => {
+    const { result } = await compileFixture("long-label");
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("TOP332_GLYPH_NOT_AVAILABLE");
+  });
+});

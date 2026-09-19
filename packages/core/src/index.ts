@@ -7,6 +7,7 @@ export * from "./components/index.js";
 export * from "./scene/index.js";
 export * from "./color.js";
 export * from "./content.js";
+export * from "./font-registry.js";
 export * from "./fonts.js";
 export * from "./visibility.js";
 export * from "./font-measurer.js";

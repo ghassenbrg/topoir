@@ -7,15 +7,21 @@ import type {
   SceneRect,
   SceneText,
 } from "./scene.js";
-import { embeddedFontCss } from "./fonts.js";
+import { embeddedFontCss, embeddedFontCssFor } from "./fonts.js";
+import type { ResolvedFontSet } from "@topoir/core";
 
-export function renderSvg(scene: Scene): string {
+/**
+ * `fonts` is the resolved set measurement used. Passing it makes the embedded faces
+ * provably the same resources layout was computed against; omitting it keeps the previous
+ * behavior of embedding the default chain.
+ */
+export function renderSvg(scene: Scene, fonts?: ResolvedFontSet): string {
   const markerColors = [...collectMarkerColors(scene.children)].sort((left, right) => left.localeCompare(right, "en"));
   const defs = markerColors
     .map((color) => `<marker id="${markerId(color)}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9Z" fill="${escapeAttribute(color)}"/></marker>`)
     .join("");
   const body = (scene.attribution ? `<metadata id="topoir-artwork-licenses">${escapeText(scene.attribution)}</metadata>` : "") + scene.children.map(renderElement).join("");
-  const fontCss = embeddedFontCss();
+  const fontCss = fonts === undefined ? embeddedFontCss() : embeddedFontCssFor(fonts);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${number(scene.width)}" height="${number(scene.height)}" viewBox="0 0 ${number(scene.width)} ${number(scene.height)}" role="img" aria-labelledby="topoir-title topoir-description" data-topoir-renderer="svg-v1" font-family="${escapeAttribute(scene.fontFamily)}"><title id="topoir-title">${escapeText(scene.title)}</title><desc id="topoir-description">${escapeText(scene.description ?? `Architecture diagram: ${scene.title}`)}</desc><defs><style>${fontCss}</style>${defs}</defs>${body}</svg>\n`;
 }
 

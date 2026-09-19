@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-19. This file is the live execution ledger for the design program.
 
-**Program state: in progress. M0 complete. Next task: T06. Current milestone: M1 (T05–T09).**
+**Program state: in progress. M0 complete. Next task: T07. Current milestone: M1 (T05–T09).**
 
 The full review previously verified `bc64cf2`: 91 tests in 15 files passed; 240/240 synthetic cases compiled without hard geometry defects; 220/240 passed the selected defect counters; six reference candidates were deterministic with no approved parity recorded. These are historical baseline observations, not evidence that the tasks below are implemented. The design-writing task added documents/examples only.
 
@@ -16,7 +16,7 @@ Allowed task states: `not_started`, `in_progress`, `implemented_pending_gate`, `
 | T03 | M0 | complete | Attachment/bounds/coverage/nesting checks, explicit raster dimensions, output-name preflight. Found and fixed a real endpoint-detaching routing bug. See session entry. |
 | T04 | M0 | complete | Capability registry behind CLI+MCP, `TOP252_INTENT_NOT_APPLIED`, hash-bound review records, benchmark counter/shape/acceptance separation, generator consolidation. See session entry. |
 | T05 | M1 | complete | ComponentPlan/blocks/attachments/disposition, SceneDocument and Medium in core; renderer re-exports; three-family fixtures and dependency-direction test. Interfaces only. See session entry. |
-| T06 | M1 | not_started | |
+| T06 | M1 | complete | Font registry with face hashes, fallback chains and content-keyed caching; one resolved set reaches measurement, SVG and PNG; `TOP332_GLYPH_NOT_AVAILABLE`. See session entry. |
 | T07 | M1 | not_started | |
 | T08 | M1 | not_started | |
 | T09 | M1 | not_started | |
@@ -521,3 +521,79 @@ A further test asserts all three have identical key sets: no family needs a fiel
 **Outstanding gates.** M1 gate open. No human visual review obtained or claimed.
 
 **Next ready task: T06** (versioned font and resource resolution). Its dependencies T02 and T05 are complete.
+
+### T06 — versioned font and resource resolution — 2026-09-20
+
+**Task: T06 — versioned font and resource resolution. State: complete.**
+
+Baseline commit `3b3c574` (T05). No unrelated worktree changes.
+
+**The gap T06 closes.** T02 made *family* resolution honest: an unavailable family is
+substituted and reported rather than claimed. But a family is not a resource. Measurement
+opened font files by module path in `core/src/font-measurer.ts`; the SVG embedded faces
+from a separate private list in `renderer-svg/src/fonts.ts`; the PNG rasterizer loaded a
+third copy of that list. Three independent resolutions that happened to agree. Nothing
+connected them, so nothing would have caught them drifting — and a drawing laid out with
+one set of metrics and rasterized with another is wrong in a way that "a PNG was produced"
+cannot detect.
+
+**Behavior implemented.**
+
+1. **`ResolvedFace` names one exact file by content hash.** Each face carries its path, the sha256 of its bytes, `unitsPerEm`, ascent, descent, line gap, version and licence. A test asserts the hash matches the bytes on disk, and that DejaVu's legacy metrics are unchanged (2048/1901/-483) — the registry describes the fonts the compiler already used, it does not change them.
+
+2. **One resolved set reaches all three consumers.** `resolveFontSet` produces a `ResolvedFontSet` with a full fallback chain, resolved once before any shaping. The SDK resolves it, hands it to the measurer, passes it to `renderSvg` for the embedded faces and to `renderPng` for the rasterizer's font files. A test parses the `@font-face` rules out of a produced SVG and asserts they equal the chain measurement used, face for face, in order.
+
+3. **The chain can never be empty.** The default pack is always appended, so a request for nothing, for an empty string, or for a stack of entirely unknown families still resolves to something measurable. Asserted for four such requests.
+
+4. **Caching is keyed on resolved content, not on the request.** `fingerprintOf` hashes the face hashes, so two requests resolving to the same bytes share a measurer and two that do not never can. That is what makes a cache hit provably equivalent to a cache miss, which a test asserts both at the measurer level and end to end via two compiles producing identical artifact hashes.
+
+5. **Missing glyphs are reported.** DejaVu Sans has no CJK coverage and no regional indicators, so those characters were drawn as replacement boxes in both exports with nothing in the result to say so. `TOP332_GLYPH_NOT_AVAILABLE` names the owner, the count and the specific code points. Whitespace, zero-width joiners and variation selectors are excluded, because none of them draws a glyph of its own and reporting them would be noise.
+
+**Files changed:**
+
+- `packages/core/src/font-registry.ts` (new) — `ResolvedFace`, `FontPack`, `ResolvedFontSet`, `resolveFontSet`, `selectFace`, `fingerprintOf`, `glyphCoverage`, `glyphDiagnostic`
+- `packages/core/src/font-measurer.ts` — rewritten over the registry; `id` now carries the set's fingerprint, so a layout result records which font bytes produced it
+- `packages/renderer-svg/src/fonts.ts` — derived from the registry; `embeddedFontCssFor` cached on the content fingerprint
+- `packages/renderer-svg/src/svg.ts`, `png.ts` — accept the resolved set
+- `packages/sdk/src/index.ts` — resolve once, thread through measurement and both exports, glyph check over all authored text
+- `packages/schema/src/diagnostics.ts` — `TOP332_GLYPH_NOT_AVAILABLE`
+- `packages/core/test/font-registry.test.ts` (new) — 19 assertions
+- `packages/sdk/test/review-regression.test.ts` — 4 new end-to-end assertions
+- `packages/core/test/content.test.ts` — scope note plus a covered-script case (below)
+- `docs/diagnostics.md`
+
+**A test whose scope needed correcting.** The T01 grapheme-splitting test used flag emoji.
+Those are exactly the right input for testing surrogate-pair splitting, but DejaVu has no
+glyphs for regional indicators, so the string it asserts is wrapped correctly would render
+entirely as tofu. The assertion was true and remains valuable, but on its own it implied
+coverage the pack does not have. A comment now states that explicitly, and a companion case
+exercises the same splitting on Cyrillic — which the pack does cover — so grapheme-safe
+wrapping is asserted on text that genuinely renders.
+
+**Verification:**
+
+| Command | Outcome |
+| --- | --- |
+| `pnpm exec vitest run packages/core/test/font-registry.test.ts` | 19 passed |
+| `pnpm check` | build + typecheck clean; **238 tests in 24 files passed** (214 after T05) |
+| render comparison | **all 20 example and showcase renders byte-identical** |
+| `pnpm benchmark:generalization` | 240 cases; unchanged: hard 0/240, all-clean 220/240, shape 216/240 |
+| glyph probe | `"Payments API"` and `"Café résumé naïve"` clean; `"支払いサービス"` reports 7 missing code points; `"Service 🇩🇪"` reports 2 |
+
+Byte-identical renders are the main evidence: routing every consumer through one registry
+reproduced every existing drawing exactly, while making the agreement checkable instead of
+coincidental.
+
+**Design decisions.** No contract changed. `docs/design/04-components-and-styles.md` already
+specified a `FontRegistry` with versioned faces, licences, glyph coverage, metrics and
+binary hashes, and this implements it as written. Two implementation notes: the pack list is
+DejaVu only, because adding editorial, monospace or CJK packs is explicitly later-milestone
+work and advertising them now would be exactly the dishonesty T04 removed; and
+`glyphDiagnostic` is a warning rather than an error, because tofu is a legibility problem
+the author may knowingly accept while a pack is pending, and the message says what to do.
+
+**Remaining defects.** Unchanged. Reference parity remains **0/6 unreviewed**.
+
+**Outstanding gates.** M1 gate open. No human visual review obtained or claimed.
+
+**Next ready task: T07** (implement the measured block engine). Its dependencies T05 and T06 are complete.
