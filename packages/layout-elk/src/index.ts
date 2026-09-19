@@ -30,21 +30,32 @@ const ANCHOR_EDGE_PREFIX = "__topoir_anchor__";
 
 export interface ElkLayoutOptions {
   readonly seed?: number;
+  /**
+   * Cut a long layered graph into stacked chunks so it approaches the view's aspect
+   * target. `elk.aspectRatio` on its own does nothing to a layered graph — measured on a
+   * 120-node chain it left the result at 348:1 — so reaching the target needs the
+   * wrapping pass, which brought the same graph to exactly 1.6 and ran faster. Wrapping
+   * re-reads a chain as stacked rows, which is not always wanted, so it is a candidate
+   * the composition scores rather than a default.
+   */
+  readonly wrap?: boolean;
 }
 
 export class ElkLayoutEngine implements LayoutEngine {
   public readonly id = "elk-layered-v1";
   private readonly elk: ElkApi;
   private readonly seed: number;
+  private readonly wrap: boolean;
 
   public constructor(options: ElkLayoutOptions = {}) {
     this.elk = new ElkConstructor();
     this.seed = options.seed ?? 1;
+    this.wrap = options.wrap ?? false;
   }
 
   public async layout(view: MeasuredView): Promise<LayoutResult> {
     try {
-      const input = toElkGraph(view, this.seed);
+      const input = toElkGraph(view, this.seed, this.wrap);
       const output = await this.elk.layout(input);
       const geometry = fromElkGraph(view, output);
       return {
@@ -73,7 +84,7 @@ export class ElkLayoutEngine implements LayoutEngine {
   }
 }
 
-export function toElkGraph(view: MeasuredView, seed = 1): ElkNode {
+export function toElkGraph(view: MeasuredView, seed = 1, wrap = false): ElkNode {
   const groupByParent = groupChildren(view.groups);
   const nodesByGroup = nodeChildren(view.nodes);
   const annotations = view.annotations.map<ElkNode>((annotation) => ({
@@ -84,8 +95,13 @@ export function toElkGraph(view: MeasuredView, seed = 1): ElkNode {
   }));
   const edges: ElkExtendedEdge[] = view.edges.map((edge) => {
     const storyIndex = view.design?.story?.indexOf(edge.id) ?? -1;
+    // ELK's layered wrapping pass throws `java.util.NoSuchElementException` on any edge
+    // that carries a label, under every cutting strategy. Label boxes are only a spacing
+    // hint here — `refineLabels` places every edge label against the finished polyline
+    // regardless — so the wrapped candidate goes in without them and pays for it in the
+    // score if that costs a collision.
     const label: ElkLabel[] =
-      edge.labelText === undefined
+      edge.labelText === undefined || wrap
         ? []
         : [
             {
@@ -169,7 +185,7 @@ export function toElkGraph(view: MeasuredView, seed = 1): ElkNode {
 
   const children: ElkNode[] = [
     ...(groupByParent.get(undefined) ?? []).map((group) =>
-      groupToElk(group, groupByParent, nodesByGroup, edgesByContainer, packable),
+      groupToElk(group, groupByParent, nodesByGroup, edgesByContainer, packable, wrap ? view.layout.aspectRatio : undefined),
     ),
     ...(nodesByGroup.get(undefined) ?? []).map(nodeToElk),
     ...annotations,
@@ -198,6 +214,17 @@ export function toElkGraph(view: MeasuredView, seed = 1): ElkNode {
       "elk.spacing.edgeNode": "20",
       "elk.spacing.edgeEdge": "14",
       "elk.padding": "[top=24,left=24,bottom=24,right=24]",
+      // The aspect target only reaches a layered graph through the wrapping pass; on its
+      // own the option is inert. Both are set together so the cut positions are chosen
+      // against the shape the author actually asked for.
+      ...(wrap
+        ? {
+            "elk.aspectRatio": String(view.layout.aspectRatio),
+            "elk.layered.wrapping.strategy": "SINGLE_EDGE",
+            "elk.layered.wrapping.cutting.strategy": "ARD",
+            "elk.layered.wrapping.additionalEdgeSpacing": "24",
+          }
+        : {}),
     },
   };
 }
@@ -208,6 +235,8 @@ function groupToElk(
   nodesByGroup: ReadonlyMap<string | undefined, readonly MeasuredNode[]>,
   edgesByContainer: ReadonlyMap<string | undefined, readonly ElkExtendedEdge[]>,
   packable: ReadonlySet<string>,
+  /** Set only while wrapping; the depth that makes a diagram a ribbon is usually inside a boundary, not at the root. */
+  wrapAspect?: number,
 ): ElkNode {
   const mode = group.layout.mode;
   // The box packer cannot lay out edges, and a packed boundary anywhere in the chain
@@ -222,7 +251,7 @@ function groupToElk(
         : directionFor(group.layout.direction);
   const children = [
     ...(groupsByParent.get(group.id) ?? []).map((child) =>
-      groupToElk(child, groupsByParent, nodesByGroup, edgesByContainer, packable),
+      groupToElk(child, groupsByParent, nodesByGroup, edgesByContainer, packable, wrapAspect),
     ),
     ...(nodesByGroup.get(group.id) ?? []).map(nodeToElk),
   ];
@@ -249,6 +278,17 @@ function groupToElk(
         ? {
             "elk.aspectRatio": String((gridColumns * gridColumns) / gridRows),
             "elk.box.packingMode": "SIMPLE",
+          }
+        : {}),
+      // A boundary holding a long run of components is what makes the whole canvas a
+      // ribbon, so wrapping has to reach containers, not just the root. `column`/`row`
+      // are a declared sequence and are left alone.
+      ...(wrapAspect !== undefined && algorithm === "layered" && mode !== "column" && mode !== "row" && children.length > 3
+        ? {
+            "elk.aspectRatio": String(wrapAspect),
+            "elk.layered.wrapping.strategy": "SINGLE_EDGE",
+            "elk.layered.wrapping.cutting.strategy": "ARD",
+            "elk.layered.wrapping.additionalEdgeSpacing": "24",
           }
         : {}),
       "elk.nodeSize.constraints": "MINIMUM_SIZE",
@@ -369,20 +409,34 @@ function fromElkGraph(view: MeasuredView, graph: ElkNode) {
         if (Math.abs(previous.x - current.x) <= 0.02) points[index] = { ...current, x: previous.x };
         else if (Math.abs(previous.y - current.y) <= 0.02) points[index] = { ...current, y: previous.y };
       }
+      // A declared label must survive whatever the backend does with it. ELK returns no
+      // label box when it was never given one — which is how the wrapped candidate is
+      // laid out, because its wrapping pass throws on labelled edges — so the measured
+      // text supplies the rectangle and `refineLabels` places it against the polyline.
+      // Without this an edge label disappears from the diagram with every metric clean.
+      const measured = view.edges.find((item) => item.id === edge.id)?.labelText;
+      const placed =
+        label?.x !== undefined && label.y !== undefined
+          ? {
+              x: round(label.x + edgeOffset.x),
+              y: round(label.y + edgeOffset.y),
+              width: round(label.width ?? 0),
+              height: round(label.height ?? 0),
+              text: label.text ?? "",
+            }
+          : measured === undefined
+            ? undefined
+            : {
+                x: round(midpoint(points).x - (measured.width + 14) / 2),
+                y: round(midpoint(points).y - (measured.height + 8) / 2),
+                width: round(measured.width + 14),
+                height: round(measured.height + 8),
+                text: measured.lines.join(" "),
+              };
       return {
         id: edge.id,
         points,
-        ...(label?.x === undefined || label.y === undefined
-          ? {}
-          : {
-              label: {
-                x: round(label.x + edgeOffset.x),
-                y: round(label.y + edgeOffset.y),
-                width: round(label.width ?? 0),
-                height: round(label.height ?? 0),
-                text: label.text ?? "",
-              },
-            }),
+        ...(placed === undefined ? {} : { label: placed }),
       };
     });
 
@@ -461,6 +515,24 @@ function extent(
     width: Math.max(0, ...items.map((item) => item.x + item.width)) + 24,
     height: Math.max(0, ...items.map((item) => item.y + item.height)) + 24,
   };
+}
+
+/** Geometric midpoint of a polyline, used to seed a label the backend did not place. */
+function midpoint(points: readonly Point[]): Point {
+  if (points.length === 0) return { x: 0, y: 0 };
+  let total = 0;
+  for (let index = 1; index < points.length; index += 1) total += Math.abs(points[index]!.x - points[index - 1]!.x) + Math.abs(points[index]!.y - points[index - 1]!.y);
+  let travelled = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    const a = points[index - 1]!, b = points[index]!;
+    const length = Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
+    if (travelled + length >= total / 2 && length > 0) {
+      const t = (total / 2 - travelled) / length;
+      return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+    }
+    travelled += length;
+  }
+  return points[points.length - 1]!;
 }
 
 function round(value: number): number {

@@ -1,4 +1,4 @@
-import { analyzeGeometry, type GeometryView, type GeometryNode, type GeometryGroup, type GeometryEdge, type GeometryPort, type GeometryAnnotation, type LayoutResult, type LayoutEngine, type MeasuredView, type Point, type Rect, type MeasuredNode } from "@topoir/core";
+import { analyzeGeometry, type QualityReport, type GeometryView, type GeometryNode, type GeometryGroup, type GeometryEdge, type GeometryPort, type GeometryAnnotation, type LayoutResult, type LayoutEngine, type MeasuredView, type Point, type Rect, type MeasuredNode } from "@topoir/core";
 import { ElkLayoutEngine } from "./index.js";
 import { obstacleRoute, segmentHitsRect } from "./routing.js";
 import { banded, type BandedSpacing } from "./banded.js";
@@ -64,12 +64,19 @@ export class CompositionEngine implements LayoutEngine {
             },
           });
           evaluated += 1;
-          const score = compositionScore(view, geometry);
-          const defects = defectCount(view, geometry);
+          // One analysis per candidate. This used to run three times — once for the
+          // score, once for the defect count and once for the early exit.
+          const report = analyzeGeometry(view, geometry);
+          const score = scoreOf(report, geometry);
+          const defects = defectsOf(report);
           if (!best || defects < best.defects || (defects === best.defects && score < best.score)) {
             best = { geometry, score, defects };
           }
-          if (defects === 0 && analyzeGeometry(view, geometry).metrics.edgeCrossings === 0) {
+          // Stopping early is only safe when the candidate is good on every axis the
+          // score can see. Without the aspect condition the first geometrically legal
+          // candidate won outright and the aspect term was never compared at all, which
+          // is how a clean layout could still be an unusable shape.
+          if (defects === 0 && report.metrics.edgeCrossings === 0 && report.metrics.aspectDeviation <= ASPECT_TOLERANCE) {
             return { geometry, diagnostics: [], metrics: { candidatesEvaluated: evaluated, compositionScore: score } };
           }
         }
@@ -79,12 +86,36 @@ export class CompositionEngine implements LayoutEngine {
     }
     const candidates: { result: LayoutResult; score: number }[] = [];
     const optimize = view.design?.optimize !== false && view.design !== undefined;
+    const settle = async (seed: number, spacing: MeasuredView["layout"]["spacing"], wrap: boolean) => {
+      const result = await new ElkLayoutEngine({ seed, wrap }).layout({ ...view, layout: { ...view.layout, spacing } });
+      if (!result.geometry) return result;
+      const geometry = refineLabels(view, separateCoincidentRoutes(view, optimize ? refineRoutes(view, result.geometry) : result.geometry));
+      candidates.push({ result: { ...result, geometry }, score: compositionScore(view, geometry) });
+      return { ...result, geometry };
+    };
     for (const [seed, spacing] of (optimize ? [[1, view.layout.spacing], [7, "compact"], [19, "normal"]] : [[1, view.layout.spacing]]) as [number, MeasuredView["layout"]["spacing"]][]) {
-      const result = await new ElkLayoutEngine({ seed }).layout({ ...view, layout: { ...view.layout, spacing } });
-      if (result.geometry) {
-        const geometry = refineLabels(view, separateCoincidentRoutes(view, optimize ? refineRoutes(view, result.geometry) : result.geometry));
-        candidates.push({ result: { ...result, geometry }, score: compositionScore(view, geometry) });
-      } else if (!candidates.length && !optimize) return result;
+      const result = await settle(seed, spacing, false);
+      if (!result.geometry && !candidates.length && !optimize) return result;
+    }
+    // A layered graph does not wrap on its own, so a long pipeline runs off to one side
+    // for as far as it needs — a 120-node chain measured 37,491x370 with every geometric
+    // metric clean. Wrapping re-reads that as stacked rows, which is right for a ribbon
+    // and wrong for a small diagram: wrapping the three-node quickstart hit the aspect
+    // target exactly and was plainly worse, because its one straight connector became an
+    // S-bend around two rows. So the trigger is length, not ratio — a diagram is only
+    // re-cut once it is both off-target and too long to read across — and the wrapped
+    // candidate still has to win on score.
+    const worst = candidates.reduce(
+      (acc, entry) => {
+        if (!entry.result.geometry) return acc;
+        const { metrics } = analyzeGeometry(view, entry.result.geometry);
+        const extent = Math.max(entry.result.geometry.bounds.width, entry.result.geometry.bounds.height);
+        return { deviation: Math.min(acc.deviation, metrics.aspectDeviation), extent: Math.min(acc.extent, extent) };
+      },
+      { deviation: Infinity, extent: Infinity },
+    );
+    if (candidates.length > 0 && worst.deviation > ASPECT_TOLERANCE && worst.extent > LEGIBLE_EXTENT) {
+      await settle(1, view.layout.spacing, true);
     }
     candidates.sort((a, b) => a.score - b.score);
     const best = candidates[0];
@@ -93,9 +124,26 @@ export class CompositionEngine implements LayoutEngine {
   }
 }
 
+/**
+ * Off-target by more than 3x in either direction. Mirrors the tolerance the quality model
+ * warns at, so a candidate is never returned in a shape the analyzer then reports.
+ */
+const ASPECT_TOLERANCE = Math.log(3);
+
+/**
+ * How far a diagram may run along one axis before it stops being readable across. At the
+ * usual card width this is roughly a dozen columns; past it the canvas is a ribbon that
+ * no screen or slide shows at once, which is the only case where re-cutting the layout
+ * is worth the reading order it costs.
+ */
+const LEGIBLE_EXTENT = 2600;
+
 /** How many measurable defects remain. Crossings are a legibility cost, not a defect. */
 function defectCount(view: MeasuredView, geometry: GeometryView): number {
-  const { metrics } = analyzeGeometry(view, geometry);
+  return defectsOf(analyzeGeometry(view, geometry));
+}
+
+function defectsOf({ metrics }: QualityReport): number {
   return (
     metrics.nodeOverlaps +
     metrics.edgeNodeIntersections +
@@ -104,6 +152,7 @@ function defectCount(view: MeasuredView, geometry: GeometryView): number {
     metrics.emptyRoutes +
     metrics.droppedRelationships +
     metrics.droppedComponents +
+    metrics.droppedLabels +
     metrics.labelOverlaps +
     metrics.annotationOverlaps +
     metrics.groupTitleIntersections +
@@ -113,15 +162,22 @@ function defectCount(view: MeasuredView, geometry: GeometryView): number {
 }
 
 export function compositionScore(view: MeasuredView, geometry: GeometryView): number {
-  const q = analyzeGeometry(view, geometry);
+  return scoreOf(analyzeGeometry(view, geometry), geometry);
+}
+
+/**
+ * Weights. The aspect term carries 4000 because at 500 it was worth half an edge
+ * crossing, so the scorer preferred a 9:1 ribbon nobody can read over a single crossing;
+ * at 4000 a 3x miss costs about four crossings, which is the trade actually wanted.
+ */
+function scoreOf(q: QualityReport, geometry: GeometryView): number {
   const defects = q.diagnostics.filter((d) => d.severity === "error").length;
   let length = 0, bends = 0;
   for (const edge of geometry.edges) {
     bends += Math.max(0, edge.points.length - 2);
     for (let i = 1; i < edge.points.length; i++) length += distance(edge.points[i - 1]!, edge.points[i]!);
   }
-  const aspect = Math.abs(Math.log((geometry.bounds.width / Math.max(1, geometry.bounds.height)) / view.layout.aspectRatio));
-  return (q.metrics.droppedRelationships + q.metrics.droppedComponents) * 1e12 + defects * 1e9 + (q.metrics.labelOverlaps + q.metrics.annotationOverlaps + q.metrics.groupTitleIntersections) * 1e6 + q.metrics.endpointBodyCrossings * 20000 + q.metrics.illegalBoundaryCrossings * 10000 + q.metrics.coincidentEdgeSegments * 3000 + q.metrics.edgeCrossings * 1000 + aspect * 500 + bends * 8 + length * 0.015;
+  return (q.metrics.droppedRelationships + q.metrics.droppedComponents + q.metrics.droppedLabels) * 1e12 + defects * 1e9 + (q.metrics.labelOverlaps + q.metrics.annotationOverlaps + q.metrics.groupTitleIntersections) * 1e6 + q.metrics.endpointBodyCrossings * 20000 + q.metrics.illegalBoundaryCrossings * 10000 + q.metrics.coincidentEdgeSegments * 3000 + q.metrics.edgeCrossings * 1000 + q.metrics.aspectDeviation * 4000 + bends * 8 + length * 0.015;
 }
 
 function sequence(view: MeasuredView): GeometryView {

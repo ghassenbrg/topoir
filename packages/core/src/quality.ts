@@ -20,12 +20,30 @@ export interface QualityReport {
     readonly emptyRoutes: number;
     readonly droppedRelationships: number;
     readonly droppedComponents: number;
+    readonly droppedLabels: number;
     readonly illegalBoundaryCrossings: number;
     readonly labelOverlaps: number;
     readonly annotationOverlaps: number;
     readonly groupTitleIntersections: number;
+    /** Produced canvas proportion, width over height. */
+    readonly aspectRatio: number;
+    /**
+     * How far the produced proportion is from the view's target, as `|ln(produced /
+     * target)|`, so being twice as wide and half as wide cost the same. Geometric
+     * legality says nothing about whether a diagram is a usable shape: a 120-node chain
+     * measured 37,491x370 with every other metric at zero.
+     */
+    readonly aspectDeviation: number;
+    /** Share of the canvas covered by components, 0 to 1. */
+    readonly inkCoverage: number;
   };
 }
+
+/** Below this many components there is no alternative arrangement to warn about. */
+const SHAPE_FLOOR = 6;
+/** Off-target by more than 3x in either direction. */
+const ASPECT_TOLERANCE = Math.log(3);
+const SPARSE_COVERAGE = 0.06;
 
 export function analyzeGeometry(view: MeasuredView, geometry: GeometryView): QualityReport {
   const diagnostics: Diagnostic[] = [];
@@ -77,6 +95,15 @@ export function analyzeGeometry(view: MeasuredView, geometry: GeometryView): Qua
   }
   for (const node of droppedNodes) {
     diagnostics.push(error("TOP413_COMPONENT_DROPPED", `Node ${JSON.stringify(node.id)} was not placed and is missing from the diagram.`));
+  }
+  // A label is declared content too. Routing a relationship but losing the text that says
+  // what it carries leaves a diagram that looks clean and no longer explains itself, and
+  // it is the same failure as a dropped edge: a backend that was never handed the label
+  // simply does not return one.
+  const labelledById = new Map(geometry.edges.map((edge) => [edge.id, edge.label]));
+  const droppedLabels = view.edges.filter((edge) => edge.labelText !== undefined && routedIds.has(edge.id) && labelledById.get(edge.id) === undefined);
+  for (const edge of droppedLabels) {
+    diagnostics.push(error("TOP414_EDGE_LABEL_DROPPED", `Edge ${JSON.stringify(edge.id)} declares a label but none was placed, so the connector is drawn unexplained.`));
   }
 
   for (const edgeGeometry of geometry.edges) {
@@ -165,6 +192,33 @@ export function analyzeGeometry(view: MeasuredView, geometry: GeometryView): Qua
       message: `Edges ${JSON.stringify(pair.left)} and ${JSON.stringify(pair.right)} are drawn on top of each other for ${Math.round(pair.overlap)}px, so two relationships read as one line.`,
     });
   }
+  // Shape. A diagram can satisfy every geometric rule above and still be unusable
+  // because of the rectangle it occupies, so the proportion the author asked for and the
+  // share of canvas that carries content are measured like any other quality property.
+  const canvasWidth = Math.max(1, geometry.bounds.width);
+  const canvasHeight = Math.max(1, geometry.bounds.height);
+  const aspectRatio = canvasWidth / canvasHeight;
+  const target = view.layout.aspectRatio > 0 ? view.layout.aspectRatio : 1.6;
+  const aspectDeviation = Math.abs(Math.log(aspectRatio / target));
+  const componentArea = geometry.nodes.reduce((total, node) => total + node.width * node.height, 0);
+  const inkCoverage = componentArea / (canvasWidth * canvasHeight);
+  if (geometry.nodes.length >= SHAPE_FLOOR && aspectDeviation > ASPECT_TOLERANCE) {
+    diagnostics.push(
+      warning(
+        "TOP433_ASPECT_OFF_TARGET",
+        `The diagram is ${aspectRatio.toFixed(2)}:1 against a target of ${target.toFixed(2)}:1, so it does not fit the shape it was asked for.`,
+      ),
+    );
+  }
+  if (geometry.nodes.length >= SHAPE_FLOOR && inkCoverage < SPARSE_COVERAGE) {
+    diagnostics.push(
+      warning(
+        "TOP434_CANVAS_SPARSE",
+        `Components cover ${(inkCoverage * 100).toFixed(1)}% of the canvas, so the diagram reads as mostly empty space.`,
+      ),
+    );
+  }
+
   return {
     diagnostics,
     metrics: {
@@ -177,12 +231,20 @@ export function analyzeGeometry(view: MeasuredView, geometry: GeometryView): Qua
       emptyRoutes,
       droppedRelationships: droppedEdges.length,
       droppedComponents: droppedNodes.length,
+      droppedLabels: droppedLabels.length,
       illegalBoundaryCrossings,
       labelOverlaps,
       annotationOverlaps,
       groupTitleIntersections,
+      aspectRatio: round4(aspectRatio),
+      aspectDeviation: round4(aspectDeviation),
+      inkCoverage: round4(inkCoverage),
     },
   };
+}
+
+function round4(value: number): number {
+  return Math.round(value * 10000) / 10000;
 }
 
 /**
