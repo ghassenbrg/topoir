@@ -1,9 +1,9 @@
-import { assetOrigin, assetReferences, contentLayout, nodeShape, type MeasuredNode, type GeometryNode, type Point, type TopoIRTheme } from "@topoir/core";
+import { assetOrigin, assetReferences, componentTextColor, contentLayout, nodeShape, readableTextOn, type MeasuredNode, type GeometryNode, type Point, type TopoIRTheme } from "@topoir/core";
 import type { AssetRegistry } from "@topoir/assets";
 import type { SceneElement, SceneGroup, SceneRect } from "./scene.js";
 import { iconScene } from "./icons.js";
 
-export function nodeComponent(node: MeasuredNode, geometry: GeometryNode, offset: Point, theme: TopoIRTheme, assets: AssetRegistry, focus: boolean, step?: number): SceneGroup {
+export function nodeComponent(node: MeasuredNode, geometry: GeometryNode, offset: Point, theme: TopoIRTheme, assets: AssetRegistry, focus: boolean, step?: number, authoredTextKinds: ReadonlySet<string> = new Set()): SceneGroup {
   // Every mark this component draws is owned by the occurrence it represents, so a
   // diagnostic can name the component a defect belongs to and coverage can be checked
   // against the model rather than against a count of rectangles.
@@ -65,15 +65,20 @@ export function nodeComponent(node: MeasuredNode, geometry: GeometryNode, offset
     }
   } else children.push({ ...iconScene(node.kind, iconX, iconY, size, accent), owner: own("icon") });
   const textX = x + layout.textX;
-  children.push({ type: "text", owner: own("label"), x: textX, y: y + layout.labelBaseline, lines: node.labelText.lines, lineHeight: node.labelText.lineHeight, fill: basePaint.text, fontSize: theme.font.labelSize, fontWeight: focus ? 700 : 600, ...(vertical ? { anchor: "middle" } : {}) });
+  children.push({ type: "text", owner: own("label"), x: textX, y: y + layout.labelBaseline, lines: node.labelText.lines, lineHeight: node.labelText.lineHeight, fill: componentTextColor(node, theme, authoredTextKinds), fontSize: theme.font.labelSize, fontWeight: focus ? 700 : 600, ...(vertical ? { anchor: "middle" } : {}) });
   if (node.descriptionText && layout.descriptionBaseline !== undefined) children.push({ type: "text", owner: own("description"), x: textX, y: y + layout.descriptionBaseline, lines: node.descriptionText.lines, lineHeight: node.descriptionText.lineHeight, fill: theme.canvas.muted, fontSize: theme.font.descriptionSize, ...(vertical ? { anchor: "middle" } : {}) });
   if (showPorts) {
     // Drawn from the same measured slots that layout pinned the ports to.
     for (const port of node.ports) {
       const slot = port.slot;
       if (slot === undefined) continue;
+      // The compartment is filled with the canvas colour, so its label must be readable
+      // against that. The component's own tint is kept where it works — it is a real
+      // design choice — and gives way to the canvas's text colour where it does not.
+      // Pairing the two tokens by position alone produced dark labels on a dark
+      // compartment whenever a theme darkened the canvas without restating component text.
       children.push({ type: "rect", owner: own(`port:${port.id}`), x: x + slot.x, y: y + slot.y, width: slot.width, height: slot.height, rx: 7, fill: theme.canvas.background, stroke: accent, strokeWidth: 1 });
-      children.push({ type: "text", owner: own(`port:${port.id}`), x: x + slot.x + slot.width / 2, y: y + slot.y + slot.height / 2 + theme.font.descriptionSize * 0.36, lines: port.labelText?.lines ?? [port.label], lineHeight: port.labelText?.lineHeight ?? theme.font.descriptionSize * 1.2, fill: basePaint.text, fontSize: theme.font.descriptionSize, fontWeight: 600, anchor: "middle" });
+      children.push({ type: "text", owner: own(`port:${port.id}`), x: x + slot.x + slot.width / 2, y: y + slot.y + slot.height / 2 + theme.font.descriptionSize * 0.36, lines: port.labelText?.lines ?? [port.label], lineHeight: port.labelText?.lineHeight ?? theme.font.descriptionSize * 1.2, fill: readableTextOn(theme.canvas.background, basePaint.text, theme.canvas.foreground), fontSize: theme.font.descriptionSize, fontWeight: 600, anchor: "middle" });
     }
   }
   if (badge && layout.badgeStrip !== undefined && layout.badgeBaseline !== undefined) {

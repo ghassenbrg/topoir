@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-19. This file is the live execution ledger for the design program.
 
-**Program state: in progress. M0 and M1 complete. Next task: T13. Current milestone: M2 (T10–T15).**
+**Program state: in progress. M0 and M1 complete. Next task: T14. Current milestone: M2 (T10–T15).**
 
 The full review previously verified `bc64cf2`: 91 tests in 15 files passed; 240/240 synthetic cases compiled without hard geometry defects; 220/240 passed the selected defect counters; six reference candidates were deterministic with no approved parity recorded. These are historical baseline observations, not evidence that the tasks below are implemented. The design-writing task added documents/examples only.
 
@@ -23,7 +23,7 @@ Allowed task states: `not_started`, `in_progress`, `implemented_pending_gate`, `
 | T10 | M2 | complete | v1alpha2 envelope, family registry, generated types with a drift test. Structural validation only — it does not compile yet, and discovery says so. See session entry. |
 | T11 | M2 | complete | Workspace normalization, entity identity, exact/induced selection, occurrences with required bindings, collapse coverage, v1alpha1 migration with inventory equality. v1alpha2 now compiles. See session entry. |
 | T12 | M2 | complete | Presentation plan with per-field dispositions, normalized medium and audience floors, compiled constraints with contradiction detection. Boundary focus now actually works. See session entry. |
-| T13 | M2 | not_started | |
+| T13 | M2 | complete | Style resolution with authored-token tracking, semantic roles surviving focus/muting, surface-aware text colour. Fixed all 9 invisible-text corpus cases with zero golden changes. See session entry. |
 | T14 | M2 | not_started | |
 | T15 | M2 | not_started | |
 | T16 | M3 | not_started | |
@@ -1164,3 +1164,75 @@ Reference parity remains **0/6 unreviewed**.
 
 **Next ready task: T13** (resolved style grammar and reusable rules). Its dependencies T08,
 T10 and T12 are complete, and it owns the dark-canvas cascade defect class T09 recorded.
+
+### T13 — resolved style grammar and reusable rules — 2026-09-20
+
+**Task: T13 — resolved style grammar and reusable rules. State: complete.**
+
+Baseline commit `6f28de5` (T12). No unrelated worktree changes.
+
+**Headline result: all nine invisible-text cases T09 found are fixed, and no golden changed.**
+The generalization corpus went from 30 failures to **21** — the 20 pre-existing soft
+failures plus the single clipped edge label, which belongs to T18/T19.
+
+**Two real bugs, both of the same shape: two tokens from different groups paired by
+position rather than by contract.**
+
+1. **A component with no surface of its own.** An icon-style component has no card behind its label — the label sits on the page. Its colour was taken from the component token group anyway, so a theme that darkened the canvas without restating component text carried a near-black inherited colour onto a dark page. `componentTextColor` now resolves it against the surface the label is actually painted on.
+
+2. **A route compartment painted in the canvas colour, labelled in the component's colour.** Same failure, different pair. Found only by chasing the cases the first fix did not resolve.
+
+**How I got there, including the wrong turn.** The first attempt applied the cascade
+**theme-wide**, on the assumption that an icon theme means fill-less components. The corpus
+immediately disagreed: failures went **30 → 31**. An icon theme still draws a *replicated*
+component as a stack and honours an explicit `visual.shape`, so a theme-wide rule was wrong
+in both directions — it stripped the tint from components that did have surfaces. The rule
+is per **component**, resolved from the shape that component actually takes. That took it to
+24, and the compartment fix to 21.
+
+**A second correction, prompted by a golden diff.** Making compartment text unconditionally
+take the canvas colour fixed the dark case but changed `trust-zones`, which uses the light
+`technical-clean` pack where the kind-tinted compartment text was perfectly readable. That
+tint is a deliberate design choice, and discarding it to fix an unrelated case would have
+been me imposing a preference. `readableTextOn` keeps the preferred semantic colour wherever
+it is readable and falls back to the surface's own colour only where it is not — which is
+the documented precedence, semantic colour first with the accessibility floor enforced.
+
+With that, **both** golden diffs disappeared. That is the correct outcome, not a lucky one:
+`paired-regions` uses the built-in light icon pack, whose dark-on-white labels were never
+broken, so nothing about it should change. My earlier note calling that a "latent bug" was
+wrong — `#172033` versus `#172B4D` is a design nuance, not a defect.
+
+**Also implemented** (`core/src/style/resolve.ts`):
+
+- **Deterministic layering** — family defaults → pack → workspace named style → view tokens. A named style chain is walked to its root before merging, so declaration order cannot change the answer; asserted by resolving the same chain forwards and reversed.
+- **Authored-token tracking**, so the cascade can tell an inherited value from a deliberate one. An explicitly authored text colour is never overruled; the scene check reports it if nobody can read it.
+- **Semantic roles rather than literal colours.** `semanticTreatment` returns a role, a colour, a *marker* and an opacity. A muted failure keeps its role, its colour and its dashed marker, and only dims — which is what keeps a legend's mapping intact. Each status has a distinct marker, so meaning does not rest on colour alone. Status outranks focus, because a failure is not decoration.
+
+**Files added:** `core/src/style/resolve.ts`, `core/test/style.resolution.test.ts` (29
+assertions). **Changed:** `core/src/theme.ts` (`hasOwnSurface`, `componentTextColor`,
+`readableTextOn`), `renderer-svg/src/component.ts`, `renderer-svg/src/build-scene.ts`
+(authored-kind threading), `core/src/index.ts`.
+
+**Verification:**
+
+| Command | Outcome |
+| --- | --- |
+| `pnpm exec vitest run packages/core/test/style.resolution.test.ts` | 29 passed |
+| `pnpm check` | build + typecheck clean; **437 tests in 32 files passed** (408 after T12) |
+| render comparison | **all 20 byte-identical** |
+| `pnpm benchmark:generalization` | **21 failures, down from 30**; zero `TOP442` remaining; 239/240 compile clean |
+
+**Acceptance:**
+
+- *Inheritance is deterministic and acyclic* — order-independence asserted; acyclicity enforced at T11 and asserted there.
+- *Equivalent empty overrides are equivalent* — asserted for **every** built-in pack, and for an empty workspace style against its pack.
+- *Semantic marker/colour mapping survives focus and muting* — asserted, including that muting changes only opacity.
+- *Generated style previews pass scene QA* — asserted at the resolution layer for every pack and every kind it styles, **and** for a darkened extension of every pack, not only the two the generator happened to produce.
+
+**Remaining defects.** One generated case (0165) still paints an edge label 12px off the
+canvas; that is placement, for T18/T19. The 20 soft geometry failures are unchanged.
+Reference parity remains **0/6 unreviewed**.
+
+**Next ready task: T14** (V2 acceptance profiles and candidate quality vector). Its
+dependencies T09 and T12 are complete.

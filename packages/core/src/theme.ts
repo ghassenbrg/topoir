@@ -1,6 +1,6 @@
 import type { DesignTokens, EdgeKind, GroupKind, NodeKind, NodeVisual } from "@topoir/schema";
 import { resolveFont } from "./fonts.js";
-import { normalizeColor } from "./color.js";
+import { contrastRatio, MINIMUM_TEXT_CONTRAST, normalizeColor } from "./color.js";
 
 export interface PaintStyle {
   readonly fill: string;
@@ -312,6 +312,68 @@ function mergePaints<K extends string>(
     merged[kind] = { ...(merged[kind] ?? fallback), ...stripPaint(paint) };
   }
   return merged as Readonly<Partial<Record<K, PaintStyle>>>;
+}
+
+/**
+ * Whether a component is drawn with a surface of its own.
+ *
+ * An icon-style component has no card behind its label: the label sits directly on the
+ * page. Whether that is true is a property of the *component*, not the theme — an icon
+ * theme still draws a replicated component as a stack, and an explicit `visual.shape`
+ * overrides the theme entirely. A theme-wide rule gets this wrong in both directions.
+ */
+export function hasOwnSurface(node: { kind: NodeKind; visual?: NodeVisual }, theme: TopoIRTheme): boolean {
+  const shape = nodeShape(node, theme);
+  return shape !== "icon" && shape !== "image";
+}
+
+/**
+ * The colour a component's label is drawn in (T13).
+ *
+ * A component with its own surface uses its own text token, against its own fill. One
+ * without a surface takes `canvas.foreground`, because its label is text on the page and
+ * that is the colour the author chose for text on this page.
+ *
+ * T09 found nine generated cases where this was wrong: a theme darkened the canvas without
+ * restating component text, and icon-style labels kept a near-black inherited colour on a
+ * dark page at 1.13:1. The token-level check could not see it, because it compared
+ * component text against component *fill* — which those components do not have.
+ *
+ * An explicitly authored text colour for that kind is left alone. The author chose it, and
+ * the scene check reports it if nobody can read it.
+ */
+export function componentTextColor(
+  node: { kind: NodeKind; visual?: NodeVisual },
+  theme: TopoIRTheme,
+  authoredKinds: ReadonlySet<string> = new Set(),
+): string {
+  const paint = theme.node.byKind[node.kind] ?? theme.node.default;
+  if (hasOwnSurface(node, theme)) return paint.text;
+  // The label sits on the page. An explicitly authored colour for this kind stands, and
+  // the scene check reports it if nobody can read it; otherwise the kind's tint is kept
+  // where it is readable on the canvas and gives way to the canvas's own text colour
+  // where it is not.
+  if (authoredKinds.has(node.kind) || authoredKinds.has("default")) return paint.text;
+  return readableTextOn(theme.canvas.background, paint.text, theme.canvas.foreground);
+}
+
+/**
+ * A text colour that is actually readable on the surface it will be painted on.
+ *
+ * `preferred` carries the semantic meaning — a component kind's tint, which is a real
+ * design choice and is kept wherever it works. `fallback` is the colour that belongs to
+ * the surface itself. The preferred colour wins unless it cannot be read there, which is
+ * the documented precedence: semantic colour first, accessibility floor enforced.
+ *
+ * This exists because two tokens from different groups were being paired by position
+ * rather than by contract: a route compartment painted in the canvas colour carried text
+ * in the *component's* colour, so a theme that darkened the canvas without restating
+ * component text produced dark labels on a dark compartment.
+ */
+export function readableTextOn(surface: string, preferred: string, fallback: string): string {
+  const ratio = contrastRatio(preferred, surface);
+  if (ratio === undefined || ratio >= MINIMUM_TEXT_CONTRAST) return preferred;
+  return fallback;
 }
 
 export function nodeShape(node: { kind: NodeKind; visual?: NodeVisual }, theme: TopoIRTheme): NonNullable<NodeVisual["shape"]> {

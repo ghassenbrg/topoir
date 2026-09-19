@@ -20,6 +20,16 @@ export function buildScene(
   theme: TopoIRTheme,
   assets = new AssetRegistry(),
 ): Scene {
+  // Component kinds whose text colour the author set explicitly. Those keep the author's
+  // choice; the rest of a surface-less component's label takes the canvas foreground.
+  const authoredTextKinds = new Set<string>();
+  if (typeof view.theme === "object" && view.theme !== null) {
+    const tokens = view.theme as { node?: { default?: { text?: unknown }; byKind?: Record<string, { text?: unknown }> } };
+    if (tokens.node?.default?.text !== undefined) authoredTextKinds.add("default");
+    for (const [kind, paint] of Object.entries(tokens.node?.byKind ?? {})) {
+      if (paint?.text !== undefined) authoredTextKinds.add(kind);
+    }
+  }
   const flowColors = new Map(
     view.flows.map((flow, index) => [flow.id, flow.color ?? theme.edge.palette[index % theme.edge.palette.length] ?? theme.edge.stroke]),
   );
@@ -195,7 +205,7 @@ export function buildScene(
     const storyEdges = (view.design?.story ?? []).map((id) => edgeById.get(id)).filter((edge) => edge !== undefined);
     const storyNodes = [...new Set(storyEdges.flatMap((edge) => [edge.from, edge.to]))];
     const step = storyNodes.indexOf(node.id);
-    return [nodeComponent(node, nodeGeometry, offset, theme, assets, view.design?.focus?.includes(node.id) ?? false, step < 0 ? undefined : step + 1)];
+    return [nodeComponent(node, nodeGeometry, offset, theme, assets, view.design?.focus?.includes(node.id) ?? false, step < 0 ? undefined : step + 1, authoredTextKinds)];
   });
 
   const annotations: SceneElement[] = geometry.annotations.flatMap((annotationGeometry) => {
