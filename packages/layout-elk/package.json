@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@topoir/core": "workspace:*",
-    "elkjs": "^0.11.0"
+    "elkjs": "^0.12.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
