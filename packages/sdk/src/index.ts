@@ -3,9 +3,12 @@ import { AssetRegistry, discoverAssets } from "@topoir/assets";
 import {
   analyzeContent,
   analyzeGeometry,
+  analyzeVisibility,
+  fontDiagnostic,
   loadDocument,
   measureView,
   projectView,
+  resolveFont,
   resolveTheme,
   type GeometryView,
   type LayoutEngine,
@@ -157,6 +160,18 @@ export class TopoIRCompiler {
         });
         continue;
       }
+      // A font the compiler cannot measure and embed is substituted, and the substitution
+      // is reported. `resolveTheme` has already put the resolved family on the theme, so
+      // measurement, the scene and the embedded faces all name the same thing.
+      const requestedFamily = typeof view.theme === "object" && view.theme !== null ? view.theme.font?.family : undefined;
+      if (requestedFamily !== undefined) {
+        const substitution = fontDiagnostic(resolveFont(requestedFamily));
+        if (substitution !== undefined) diagnostics.push(substitution);
+      }
+      // Paint the view actually uses has to be readable and has to be real colour.
+      const visibility = analyzeVisibility(view, theme);
+      diagnostics.push(...visibility.diagnostics);
+
       const measured = measureView(view, theme, options.textMeasurer, (reference) => assets.resolve(reference));
       for (const node of measured.nodes) {
         const explicit = node.visual?.assets ?? [];
@@ -183,7 +198,7 @@ export class TopoIRCompiler {
         measured,
         geometry: layout.geometry,
         scene,
-        metrics: { ...layout.metrics, ...quality.metrics, ...content.metrics },
+        metrics: { ...layout.metrics, ...quality.metrics, ...content.metrics, ...visibility.metrics },
       };
       compiledViews.push(compiled);
 

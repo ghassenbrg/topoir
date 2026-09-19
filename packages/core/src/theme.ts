@@ -1,4 +1,6 @@
 import type { DesignTokens, EdgeKind, GroupKind, NodeKind, NodeVisual } from "@topoir/schema";
+import { resolveFont } from "./fonts.js";
+import { normalizeColor } from "./color.js";
 
 export interface PaintStyle {
   readonly fill: string;
@@ -15,6 +17,27 @@ export interface TopoIRTheme {
     readonly connectorRadius: number;
     readonly depth: number;
     readonly iconSize: number;
+    /**
+     * The three tokens below carry decisions the renderer used to make by comparing
+     * `theme.id` against a hardcoded list of theme names. That made inheritance
+     * non-compositional: `{extends: dark-engineering}` resolves to the id
+     * `dark-engineering+authored`, which matched none of those branches, so an empty
+     * override silently dropped treatment its base had. Expressing the decisions as
+     * tokens means they merge with everything else, and an empty extension is equal to
+     * its base.
+     *
+     * They are internal resolved tokens, not public authoring syntax; T13 owns the
+     * public style grammar.
+     */
+    /** Fill of the offset plate behind a component drawn with depth. Defaults to the component's own fill. */
+    readonly depthFill?: string;
+    /** Draw a leading accent bar on every component, not only the focused one. */
+    readonly accentBar?: boolean;
+    /**
+     * Plate drawn behind a full-colour asset. Dark and blueprint canvases need one, or a
+     * multi-colour vendor logo drawn straight onto the canvas loses its darker strokes.
+     */
+    readonly assetBackplate?: string;
   };
   readonly font: {
     readonly family: string;
@@ -158,7 +181,7 @@ const cloud: TopoIRTheme = {
 };
 const executive: TopoIRTheme = {
   ...technicalCleanTheme, id: "executive",
-  language: { component: "card", header: "editorial", boundaries: "rail", connectorRadius: 16, depth: 5, iconSize: 34 },
+  language: { component: "card", header: "editorial", boundaries: "rail", connectorRadius: 16, depth: 5, iconSize: 34, depthFill: "#DDDCD5", accentBar: true },
   canvas: { background: "#F4F1EB", foreground: "#172C38", muted: "#657779" },
   font: { ...technicalCleanTheme.font, labelSize: 17, descriptionSize: 12, groupTitleSize: 14 },
   node: { ...technicalCleanTheme.node, minWidth: 200, minHeight: 100, radius: 16, iconSize: 34, byKind: {}, default: { fill: "#FFFFFF", stroke: "#93A6A3", text: "#172C38" } },
@@ -167,7 +190,7 @@ const executive: TopoIRTheme = {
 };
 const dark: TopoIRTheme = {
   ...technicalCleanTheme, id: "dark-engineering",
-  language: { component: "architectural", header: "rule", boundaries: "panel", connectorRadius: 4, depth: 0, iconSize: 34 },
+  language: { component: "architectural", header: "rule", boundaries: "panel", connectorRadius: 4, depth: 0, iconSize: 34, assetBackplate: "#F8FAFC" },
   canvas: { background: "#0C1322", foreground: "#E6EDF7", muted: "#9BABBF" },
   node: { ...technicalCleanTheme.node, minHeight: 80, radius: 5, iconSize: 34, byKind: {}, default: { fill: "#17243A", stroke: "#587495", text: "#E6EDF7" } },
   group: { ...technicalCleanTheme.group, radius: 8, byKind: {}, default: { fill: "#111C2D", stroke: "#354B66", text: "#B5C9DF" } },
@@ -176,14 +199,14 @@ const dark: TopoIRTheme = {
 };
 const blueprint: TopoIRTheme = {
   ...dark, id: "blueprint",
-  language: { component: "architectural", header: "rule", boundaries: "outline", connectorRadius: 0, depth: 0, iconSize: 30 },
+  language: { component: "architectural", header: "rule", boundaries: "outline", connectorRadius: 0, depth: 0, iconSize: 30, assetBackplate: "#F8FAFC" },
   canvas: { background: "#12344B", foreground: "#E3F6FF", muted: "#9BC5DA" },
   node: { ...dark.node, radius: 0, default: { fill: "#12344B", stroke: "#A6D7EC", text: "#E3F6FF" } },
   group: { ...dark.group, radius: 0, default: { fill: "#12344B", stroke: "#59869E", text: "#C3E6F7" } },
 };
 const sketch: TopoIRTheme = {
   ...technicalCleanTheme, id: "whiteboard",
-  language: { component: "sketch", header: "plain", boundaries: "outline", connectorRadius: 14, depth: 4, iconSize: 34 },
+  language: { component: "sketch", header: "plain", boundaries: "outline", connectorRadius: 14, depth: 4, iconSize: 34, depthFill: "#D3E6DF" },
   canvas: { background: "#FFFDF7", foreground: "#302F2B", muted: "#77736B" },
   node: { ...technicalCleanTheme.node, radius: 3, minHeight: 86, iconSize: 34, default: { fill: "#FFFDF7", stroke: "#514C43", text: "#302F2B" }, byKind: {} },
   group: { ...technicalCleanTheme.group, radius: 4, default: { fill: "#FFFDF7", stroke: "#AAA393", text: "#514C43" }, byKind: {} },
@@ -205,35 +228,39 @@ export function resolveTheme(theme: string | DesignTokens | undefined): TopoIRTh
   // Authored tokens layer over a named base, so an author states only what makes this
   // diagram's design its own and never has to restate a whole design system.
   const base = namedTheme(theme.extends ?? technicalCleanTheme.id);
+  const font = { ...base.font, ...strip(theme.font) };
   return {
     ...base,
     id: `${base.id}+authored`,
     ...(base.language || theme.language ? { language: { ...(base.language ?? defaultLanguage), ...strip(theme.language) } } : {}),
-    font: { ...base.font, ...strip(theme.font) },
-    canvas: { ...base.canvas, ...strip(theme.canvas) },
+    // The family every consumer sees is one the compiler can measure and embed, so the
+    // scene, the layout metrics and the embedded font faces cannot name three things.
+    // The SDK reports the substitution; see `resolveFont`.
+    font: { ...font, family: resolveFont(font.family).family },
+    canvas: { ...base.canvas, ...stripPaint(theme.canvas) },
     spacing: { ...base.spacing, ...strip(theme.spacing) },
     node: {
       ...base.node,
       ...strip(theme.node, ["default", "byKind"]),
-      default: { ...base.node.default, ...strip(theme.node?.default) },
+      default: { ...base.node.default, ...stripPaint(theme.node?.default) },
       byKind: mergePaints(base.node.byKind, theme.node?.byKind, base.node.default),
     },
     group: {
       ...base.group,
       ...strip(theme.group, ["default", "byKind"]),
-      default: { ...base.group.default, ...strip(theme.group?.default) },
+      default: { ...base.group.default, ...stripPaint(theme.group?.default) },
       byKind: mergePaints(base.group.byKind, theme.group?.byKind, base.group.default),
     },
     edge: {
       ...base.edge,
-      ...strip(theme.edge, ["byKind", "palette"]),
-      byKind: { ...base.edge.byKind, ...strip(theme.edge?.byKind) },
-      palette: theme.edge?.palette?.length ? [...theme.edge.palette] : base.edge.palette,
+      ...stripPaint(theme.edge, ["byKind", "palette"]),
+      byKind: { ...base.edge.byKind, ...stripPaint(theme.edge?.byKind) },
+      palette: theme.edge?.palette?.length ? theme.edge.palette.map((color) => normalizeColor(color) ?? color) : base.edge.palette,
     },
     annotation: {
-      note: { ...base.annotation.note, ...strip(theme.annotation?.note) },
-      warning: { ...base.annotation.warning, ...strip(theme.annotation?.warning) },
-      callout: { ...base.annotation.callout, ...strip(theme.annotation?.callout) },
+      note: { ...base.annotation.note, ...stripPaint(theme.annotation?.note) },
+      warning: { ...base.annotation.warning, ...stripPaint(theme.annotation?.warning) },
+      callout: { ...base.annotation.callout, ...stripPaint(theme.annotation?.callout) },
     },
   };
 }
@@ -254,6 +281,25 @@ function strip<T extends object>(value: T | undefined, omit: readonly string[] =
   ) as Partial<T>;
 }
 
+/**
+ * `strip` for objects whose string values are colours: canonicalizes them so `#fff`,
+ * `#FFF` and `white` compare equal downstream.
+ *
+ * A value the compiler does not recognize as a colour is left untouched for
+ * `analyzeVisibility` to report as `TOP331_COLOR_INVALID`; substituting a guess would
+ * paint something the author did not choose. This is separate from `strip` because
+ * `font.family` is a string that must never be read as a colour — a family legitimately
+ * named "red" would otherwise become `#FF0000`.
+ */
+function stripPaint<T extends object>(value: T | undefined, omit: readonly string[] = []): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(strip(value, omit)).map(([key, entry]) => [
+      key,
+      typeof entry === "string" ? normalizeColor(entry) ?? entry : entry,
+    ]),
+  ) as Partial<T>;
+}
+
 /** An authored paint may state only one channel; the rest comes from the base entry. */
 function mergePaints<K extends string>(
   base: Readonly<Partial<Record<K, PaintStyle>>>,
@@ -263,7 +309,7 @@ function mergePaints<K extends string>(
   if (!authored) return base;
   const merged: Record<string, PaintStyle> = { ...(base as Record<string, PaintStyle>) };
   for (const [kind, paint] of Object.entries(authored)) {
-    merged[kind] = { ...(merged[kind] ?? fallback), ...strip(paint) };
+    merged[kind] = { ...(merged[kind] ?? fallback), ...stripPaint(paint) };
   }
   return merged as Readonly<Partial<Record<K, PaintStyle>>>;
 }

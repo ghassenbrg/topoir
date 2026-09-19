@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-19. This file is the live execution ledger for the design program.
 
-**Program state: in progress. Next task: T02. Current milestone: M0 (T00–T04).**
+**Program state: in progress. Next task: T03. Current milestone: M0 (T00–T04).**
 
 The full review previously verified `bc64cf2`: 91 tests in 15 files passed; 240/240 synthetic cases compiled without hard geometry defects; 220/240 passed the selected defect counters; six reference candidates were deterministic with no approved parity recorded. These are historical baseline observations, not evidence that the tasks below are implemented. The design-writing task added documents/examples only.
 
@@ -12,7 +12,7 @@ Allowed task states: `not_started`, `in_progress`, `implemented_pending_gate`, `
 | --- | --- | --- | --- |
 | T00 | M0 | complete | Baseline at `dfad55c` recorded; 12 review defects reproduced as public fixtures + `it.fails` assertions. See session entry. |
 | T01 | M0 | complete | Six asset roles, measured badges, declared abbreviation. `TOP440_TEXT_ABBREVIATED` added. See session entry. |
-| T02 | M0 | not_started | |
+| T02 | M0 | complete | Resolved font contract, token-based theme inheritance, contrast and colour diagnostics. `TOP330`/`TOP331`/`TOP442` added. See session entry. |
 | T03 | M0 | not_started | |
 | T04 | M0 | not_started | |
 | T05 | M1 | not_started | |
@@ -244,3 +244,68 @@ Two of those assertions were rewritten while being promoted, and both became **s
 **Outstanding gates.** M0 gate still open. No human visual review obtained or claimed.
 
 **Next ready task: T02** (resolve fonts and make theme inheritance compositional). Its dependency T00 is complete, and its three probes — `invisible-text`, `unknown-font`, `theme-dark-base`/`theme-dark-extends` — are in place and failing as intended.
+
+### T02 — resolve fonts and make theme inheritance compositional — 2026-09-20
+
+**Task: T02 — resolve fonts and make theme inheritance compositional. State: complete.**
+
+Baseline commit `b11e68b` (T01). No unrelated worktree changes.
+
+**Behavior implemented.**
+
+1. **Font selection is a resolved contract.** `font.family: Invented Font Family` was accepted, the scene declared that family, measurement quietly used the bundled DejaVu Sans, and the SVG embedded only DejaVu Sans — three different answers. New `core/src/fonts.ts` resolves a requested family against what the compiler can both measure and embed, matching case-insensitively and accepting a CSS-style stack so `"Inter", "DejaVu Sans", sans-serif` resolves to its first supported entry. `resolveTheme` now puts the *resolved* family on the theme, so the scene, the layout metrics and the embedded faces cannot disagree. A substitution is reported as `TOP330_FONT_UNAVAILABLE` (warning), naming what was asked for, what was used and what is available. This is the narrow form; T06 owns the versioned registry with face hashes and glyph coverage.
+
+2. **Theme inheritance is compositional.** The renderer decided three visual treatments by comparing `theme.id` against hardcoded theme names. An extension resolves to the id `dark-engineering+authored`, which matched none of those branches, so `{extends: dark-engineering}` silently lost the asset backplate its base had. The three decisions are now resolved tokens on `theme.language` — `depthFill`, `accentBar`, `assetBackplate` — set per theme and merged like every other token. No `theme.id` comparison remains in the renderer. The tokens are internal; T13 owns the public style grammar, so no new authoring syntax was added.
+
+3. **Colour is normalized and validated.** The schema's colour pattern `^(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)$` admits strings that are not colours: five- and seven-digit hex values, and any run of letters. New `core/src/color.ts` parses 3/4/6/8-digit hex and a fixed set of colour names, canonicalizes to `#RRGGBB(AA)`, and reports anything else as `TOP331_COLOR_INVALID` (error). An unrecognized value is left untouched rather than replaced by a guess, because substituting one would paint something the author did not choose. Normalization is applied through a paint-specific `stripPaint`, deliberately not the general `strip`: `font.family` is a string that must never be read as a colour, or a family legitimately named "red" would become `#FF0000`. That case is asserted.
+
+4. **Unreadable paint is diagnosed.** New `core/src/visibility.ts` computes the WCAG 2.1 contrast ratio between each text colour and the fill behind it and reports `TOP442_TEXT_NOT_LEGIBLE` (error) below 3:1, naming both colours and the measured ratio. Only paint the view actually uses is examined — a theme entry for a component kind absent from the view says nothing about that drawing, and reporting it would train callers to ignore the diagnostic. The gate is WCAG's large-text bound rather than the 4.5:1 normal-text bound, because diagram labels are drawn at a range of sizes and the compiler should catch paint nobody can read without rejecting deliberately soft secondary text. Every built-in theme passes its own gate; that is asserted, not assumed.
+
+**Files changed:**
+
+- `packages/core/src/fonts.ts` (new) — `resolveFont`, `fontDiagnostic`, `SUPPORTED_FONT_FAMILIES`
+- `packages/core/src/color.ts` (new) — `parseColor`, `normalizeColor`, `contrastRatio`, `composite`, thresholds
+- `packages/core/src/visibility.ts` (new) — `analyzeVisibility`
+- `packages/core/src/theme.ts` — semantic tokens on `language`, resolved font family, `stripPaint`
+- `packages/core/src/index.ts` — export the three new modules
+- `packages/renderer-svg/src/component.ts` — token-driven depth plate, accent bar and asset backplate
+- `packages/schema/src/diagnostics.ts` — `TOP330_FONT_UNAVAILABLE`, `TOP331_COLOR_INVALID`, `TOP442_TEXT_NOT_LEGIBLE`
+- `packages/sdk/src/index.ts` — run `analyzeVisibility`, report font substitution, merge metrics
+- `packages/core/test/style.test.ts` (new) — 29 assertions
+- `packages/sdk/test/review-regression.test.ts` — three probes promoted from `it.fails` to `it`
+- `docs/diagnostics.md` — font, colour and legibility rows
+
+**Probes promoted from `it.fails` to `it`:**
+
+- `diagnoses text that cannot be read against its own fill` — now asserts the specific code, error severity, that the message carries both colours and the 1:1 ratio, and that `ok` is false.
+- `measures, declares and embeds the same font family` — now asserts the scene's family is actually among the embedded faces *and* that the substitution is reported.
+- `gives an empty theme extension the same visible treatment as its base` — **strengthened well past its original form.** It previously compared backplate counts between two different fixture documents. It now builds both documents from one source string so the only difference is how the identical theme is referenced, and asserts the two SVG artifacts are **byte-identical by sha256**. An empty override changes no visible mark at all.
+
+**Verification:**
+
+| Command | Outcome |
+| --- | --- |
+| `pnpm exec vitest run packages/core/test/style.test.ts` | 29 passed |
+| `pnpm exec vitest run packages/sdk/test/review-regression.test.ts` | 15 passed |
+| `pnpm check` | build + typecheck clean; **149 tests in 18 files passed** (120 after T01) |
+| `pnpm benchmark:generalization` | 240 cases, **20 soft failures / 220 passed**, 216/240 aspect, widest 46.0:1, ink 12.8% — identical cases and counts to the T00 baseline |
+| render comparison | **all 11 example renders and all 9 showcase renders byte-identical** to the committed goldens |
+
+That last row is the main evidence for the theme refactor: replacing three theme-name branches with resolved tokens reproduced every existing drawing exactly, byte for byte, while making an empty extension equal to its base. No golden was changed by T02.
+
+**Probe behavior confirmed:**
+
+- `invisible-text` — `ok: false`, one `TOP442_TEXT_NOT_LEGIBLE`: `service` label `#FFFFFF` on `#FFFFFF`, ratio 1:1.
+- `unknown-font` — scene font `DejaVu Sans`, embedded `DejaVu Sans`, one `TOP330_FONT_UNAVAILABLE` naming `Invented Font Family`.
+- `theme-dark-base` and `theme-dark-extends` — both draw 1 asset backplate, where the base drew 1 and the extension drew 0.
+
+**Design decisions.** No contract changed, so `DECISIONS.md` is untouched. Two implementation choices worth recording, neither of which is contract text:
+
+- `MINIMUM_TEXT_CONTRAST = 3` is WCAG's large-text bound, not the 4.5:1 normal-text bound. Rationale above.
+- The recognized colour-name set is the small practical list rather than the full CSS list, so a typo is reported instead of silently painting a colour the author did not choose.
+
+**Remaining defects.** Six of the twelve T00 probes remain, all assigned: detached routes, dropped group, dropped annotation, PNG raster dimensions and colliding output names (T03); group focus (T04/T12). The 20 soft generalization failures and 0/6 reference parity are unchanged. `examples/rendered/showcase/custom-assets.png` is still stale from before T01 and still untouched.
+
+**Outstanding gates.** M0 gate still open. No human visual review obtained or claimed.
+
+**Next ready task: T03** (geometry/artifact integrity and accurate dimensions). Its dependency T00 is complete, and its five probes are in place and failing as intended.

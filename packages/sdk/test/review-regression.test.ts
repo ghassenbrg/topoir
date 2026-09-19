@@ -164,33 +164,78 @@ describe("review regression: content preservation", () => {
 });
 
 describe("review regression: paint and font resolution", () => {
-  // Owning task: T02. Baseline: white text on white fill compiled clean.
-  it.fails("diagnoses text that cannot be read against its own fill", async () => {
+  // Owning task: T02 (fixed). Baseline: white text on white fill compiled clean.
+  it("diagnoses text that cannot be read against its own fill", async () => {
     const { result } = await compileFixture("invisible-text");
-    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).not.toHaveLength(0);
+    const reported = result.diagnostics.filter((diagnostic) => diagnostic.code === "TOP442_TEXT_NOT_LEGIBLE");
+    expect(reported).toHaveLength(1);
+    expect(reported[0]?.severity).toBe("error");
+    // The message states the actual paint and the measured ratio, so the repair is obvious.
+    expect(reported[0]?.message).toContain("service");
+    expect(reported[0]?.message).toContain("#FFFFFF");
+    expect(reported[0]?.message).toContain("1:1");
+    // An unreadable drawing is not a successful compilation.
+    expect(result.ok).toBe(false);
   });
 
-  // Owning task: T02. Baseline: scene claimed "Invented Font Family", SVG embedded DejaVu Sans.
-  it.fails("measures, declares and embeds the same font family", async () => {
+  // Owning task: T02 (fixed). Baseline: scene claimed "Invented Font Family", SVG embedded DejaVu Sans.
+  it("measures, declares and embeds the same font family", async () => {
     const { result, view } = await compileFixture("unknown-font");
     const svg = result.artifacts.find((artifact) => artifact.format === "svg");
     if (svg === undefined) throw new Error("no svg artifact");
     const embedded = new Set([...String(svg.content).matchAll(/@font-face\{font-family:'([^']+)'/gu)].map((match) => match[1]));
-    // Either the requested family really resolved, or the request was rejected with a
-    // diagnostic. Claiming an unavailable family in the scene while drawing another is the defect.
-    if (!embedded.has(view.scene.fontFamily)) {
-      expect(result.diagnostics.map((diagnostic) => diagnostic.code)).not.toHaveLength(0);
-    }
+    // The scene names a family that is actually embedded.
     expect([...embedded]).toContain(view.scene.fontFamily);
+    // And the substitution is reported rather than hidden.
+    const reported = result.diagnostics.filter((diagnostic) => diagnostic.code === "TOP330_FONT_UNAVAILABLE");
+    expect(reported).toHaveLength(1);
+    expect(reported[0]?.message).toContain("Invented Font Family");
+    expect(reported[0]?.message).toContain(view.scene.fontFamily);
   });
 
-  // Owning task: T02. Baseline: the named theme drew one asset backplate, `{extends: same}` drew none.
-  it.fails("gives an empty theme extension the same visible treatment as its base", async () => {
-    const base = await compileFixture("theme-dark-base");
-    const extended = await compileFixture("theme-dark-extends");
+  /**
+   * Owning task: T02 (fixed). Baseline: the named theme drew one asset backplate and
+   * `{extends: same-theme}` drew none, because the renderer branched on `theme.id` and an
+   * extension resolves to `dark-engineering+authored`.
+   *
+   * Both documents are built from one source here, so the only difference between them is
+   * how the identical theme is referenced and the comparison can be the whole artifact.
+   */
+  it("gives an empty theme extension the same visible treatment as its base", async () => {
+    const body = [
+      "apiVersion: topoir.dev/v1alpha1",
+      "kind: Architecture",
+      "metadata:",
+      "  name: theme-equivalence",
+      "  title: Theme equivalence",
+      "model:",
+      "  nodes:",
+      "    - id: a",
+      "      kind: service",
+      "      label: Service",
+      "      technology: postgresql",
+      "views:",
+      "  - id: overview",
+      "    design:",
+      "      composition: architecture",
+      "",
+    ].join("\n");
+    const compiler = new TopoIRCompiler();
+    const named = await compiler.compile(`${body}    theme: dark-engineering\n`, { format: "svg" });
+    const extended = await compiler.compile(`${body}    theme:\n      extends: dark-engineering\n`, { format: "svg" });
+
+    const namedView = named.views[0];
+    const extendedView = extended.views[0];
+    if (namedView === undefined || extendedView === undefined) throw new Error("theme probe produced no view");
+
+    // The backplate the review saw disappear.
     const backplates = (view: CompiledView): number =>
       sceneElements(view).filter((element) => element.type === "rect" && element.fill === "#F8FAFC").length;
-    expect(backplates(extended.view)).toBe(backplates(base.view));
+    expect(backplates(namedView)).toBe(1);
+    expect(backplates(extendedView)).toBe(backplates(namedView));
+
+    // Nothing else moved either: an empty override changes no visible mark at all.
+    expect(extended.artifacts[0]?.sha256).toBe(named.artifacts[0]?.sha256);
   });
 });
 

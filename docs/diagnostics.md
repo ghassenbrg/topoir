@@ -41,6 +41,8 @@ Do not parse message wording. Match `code`, then use `path` and `range` to edit 
 | `TOP321_ASSET_INVALID` | Replace unsupported/unsafe/oversized artwork with passive SVG or a supported raster |
 | `TOP322_ASSET_NOT_FOUND` | Discover the correct inventory ID; explicit `visual.asset` is an error, optional technology/icon fallback is a warning |
 | `TOP323_ASSET_OVERRIDDEN` | `visual.assets` is the complete ordered asset list for a component, so a separate `visual.asset` is not rendered; fold it into `visual.assets` or remove it |
+| `TOP330_FONT_UNAVAILABLE` | The requested `theme.font.family` is not one the compiler can measure and embed, so a supported family was used for measurement, for the scene and for the embedded faces. Use a supported family, or accept the substitution |
+| `TOP331_COLOR_INVALID` | A colour value is not one the compiler recognizes. The schema pattern admits strings that are not colours, such as a five- or seven-digit hex value or an arbitrary word; use a hex value or a supported colour name |
 | `TOP402_COMPOSITION_PORT_UNSUPPORTED` | Use topology/layers for explicit endpoint ports; experimental panels/sequence do not yet honor them |
 | `TOP412_RELATIONSHIP_DROPPED` | A declared relationship produced no route and is missing from the diagram; a layout backend lost it |
 | `TOP413_COMPONENT_DROPPED` | A declared component was not placed and is missing from the diagram |
@@ -54,14 +56,17 @@ Do not parse message wording. Match `code`, then use `path` and `range` to edit 
 | `TOP433_ASPECT_OFF_TARGET` | The diagram is more than 3x away from the view's `layout.aspectRatio`, so it is not the shape it was asked for; raise the component count it has room for, or set a target that suits the model |
 | `TOP434_CANVAS_SPARSE` | Components cover under 6% of the canvas, so the diagram reads as mostly empty space |
 
-## Content diagnostics
+## Content and legibility diagnostics
 
 Content accounting runs on the measured view, before layout. It reports authored text that
-did not fit the component that owns it.
+did not fit the component that owns it. Legibility runs on the resolved theme, over the
+paint the view actually uses — a theme entry for a component kind that does not appear in
+the view says nothing about that drawing and is not reported.
 
 | Code | Repair |
 | --- | --- |
 | `TOP440_TEXT_ABBREVIATED` | Authored text did not fit and was shortened with an ellipsis. The message names the owner, the content role, the drawn text and how many characters are not drawn. Shorten the text, give the component more text width, or accept the abbreviation deliberately |
+| `TOP442_TEXT_NOT_LEGIBLE` | Text is drawn on a fill it cannot be read against. The message states both colours and the measured WCAG contrast ratio. Change the text or fill colour for that kind |
 
 Abbreviation is a legal outcome, but never a silent one: measurement declares it, so a
 caller can tell full content from shortened content without comparing pictures. Every

@@ -19,7 +19,9 @@ export function nodeComponent(node: MeasuredNode, geometry: GeometryNode, offset
   const base: SceneRect = { type: "rect", x, y, width: w, height: h, rx: shape === "pill" ? h / 2 : theme.node.radius, fill, stroke: accent, strokeWidth: focus ? 2.6 : 1.4 };
   const children: SceneElement[] = [];
   const depth = shape === "stack" ? 7 : theme.language?.depth ?? 0;
-  if (depth > 0 && !vertical) children.push({ ...base, x: x + depth, y: y + depth, width: w - depth, height: h - depth, fill: theme.id === "whiteboard" ? "#D3E6DF" : theme.id === "executive" ? "#DDDCD5" : fill, strokeWidth: 1 });
+  // Resolved tokens, not theme names: `{extends: X}` resolves to the id `X+authored`, so
+  // a name comparison silently dropped treatment that the base theme had.
+  if (depth > 0 && !vertical) children.push({ ...base, x: x + depth, y: y + depth, width: w - depth, height: h - depth, fill: theme.language?.depthFill ?? fill, strokeWidth: 1 });
   if (shape === "cylinder") {
     children.push({ type: "path", d: `M${x} ${y + 12}C${x} ${y - 4} ${x + w} ${y - 4} ${x + w} ${y + 12}V${y + h - 12}C${x + w} ${y + h + 4} ${x} ${y + h + 4} ${x} ${y + h - 12}Z`, fill, stroke: accent, strokeWidth: focus ? 2.6 : 1.5 });
     children.push({ type: "path", d: `M${x} ${y + 12}C${x} ${y + 28} ${x + w} ${y + 28} ${x + w} ${y + 12}`, fill: "none", stroke: accent, strokeWidth: 1.2 });
@@ -28,7 +30,7 @@ export function nodeComponent(node: MeasuredNode, geometry: GeometryNode, offset
   } else if (!vertical) {
     children.push({ ...base, ...(shape === "stack" ? { width: w - 7, height: h - 7 } : {}) });
     if (theme.language?.component === "sketch") children.push({ type: "path", d: `M${x + 3} ${y + h - 4}L${x + 1} ${y + 2}L${x + w - 5} ${y - 1}`, fill: "none", stroke: accent, strokeWidth: 0.65 });
-    if (theme.id === "executive" || focus) children.push({ type: "rect", x, y: y + 12, width: 4, height: h - 24, rx: 2, fill: accent });
+    if (theme.language?.accentBar === true || focus) children.push({ type: "rect", x, y: y + 12, width: 4, height: h - 24, rx: 2, fill: accent });
   } else if (focus) {
     children.push({ ...base, fill: "none", strokeWidth: 2, rx: 12 });
   }
@@ -53,7 +55,8 @@ export function nodeComponent(node: MeasuredNode, geometry: GeometryNode, offset
   if (displayedAssets.length) {
     for (const [index, resolved] of displayedAssets.entries()) {
       const assetX = stripX + index * (assetIconWidth + 8);
-      if (resolved.collection === "devicon" && (theme.id === "dark-engineering" || theme.id === "blueprint")) children.push({ type: "rect", x: assetX - 4, y: iconY - 4, width: assetIconWidth + 8, height: iconBoxHeight + 8, rx: 6, fill: "#F8FAFC" });
+      const backplate = theme.language?.assetBackplate;
+      if (resolved.collection === "devicon" && backplate !== undefined) children.push({ type: "rect", x: assetX - 4, y: iconY - 4, width: assetIconWidth + 8, height: iconBoxHeight + 8, rx: 6, fill: backplate });
       children.push({ type: "image", x: assetX, y: iconY, width: assetIconWidth, height: iconBoxHeight, href: resolved.dataUri, title: resolved.name });
     }
   } else children.push(iconScene(node.kind, iconX, iconY, size, accent));
