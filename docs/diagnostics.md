@@ -41,6 +41,7 @@ Do not parse message wording. Match `code`, then use `path` and `range` to edit 
 | Code | Repair |
 | --- | --- |
 | `TOP251_DESIGN_REFERENCE_NOT_FOUND` | Correct the focus node or story edge ID |
+| `TOP252_INTENT_NOT_APPLIED` | The view declares intent this build accepts but does not execute, so the drawing does not reflect it. The message names the view and the specific intent. Run `topoir capabilities` to see what each intent's maturity actually is |
 | `TOP320_ASSET_DIRECTORY_INVALID` | Configure an existing readable asset directory |
 | `TOP320_ASSET_METADATA_INVALID` | Repair the `assets.yaml` mapping, file or alias metadata |
 | `TOP321_ASSET_INVALID` | Replace unsupported/unsafe/oversized artwork with passive SVG or a supported raster |

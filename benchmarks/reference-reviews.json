@@ -1,0 +1,4 @@
+{
+  "$comment": "Human visual review decisions for the reference benchmark, each bound to the sha256 of the exact reference image and generated candidate it was made against. A record whose hashes no longer match the files on disk is reported as stale, not carried forward. Only a real reviewer may add a record; the compiler never writes to this file, and an agent must never add one on a human's behalf. See docs/visual-benchmark.md.",
+  "records": []
+}

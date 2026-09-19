@@ -1,4 +1,5 @@
 export * from "./ir.js";
+export * from "./capabilities.js";
 export * from "./color.js";
 export * from "./content.js";
 export * from "./fonts.js";

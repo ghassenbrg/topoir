@@ -79,3 +79,37 @@ describe("TopoIR MCP server", () => {
     expect("text" in (result.contents[0] ?? {}) ? result.contents[0]?.text : "").toContain("topoir.dev/v1alpha1");
   });
 });
+
+describe("TopoIR MCP capability discovery", () => {
+  /**
+   * T04. The design inventory used to be a hand-maintained literal listing five
+   * compositions while the schema accepted seven. It is generated from the capability
+   * registry now, and this asserts the MCP surface agrees with the CLI surface rather
+   * than merely being non-empty.
+   */
+  it("generates the design inventory from the capability registry", async () => {
+    const { capabilitiesOfKind } = await import("@topoir/sdk");
+    const { client } = await connectedPair();
+    const result = await client.readResource({ uri: "topoir://docs/design" });
+    const first = result.contents[0];
+    const text = first !== undefined && "text" in first ? String(first.text) : "";
+    const inventory = JSON.parse(text) as {
+      compositions: { id: string; maturity: string }[];
+      intents: { id: string; maturity: string }[];
+      formats: { id: string }[];
+      maturity: Record<string, string>;
+    };
+
+    expect(inventory.compositions).toEqual(capabilitiesOfKind("composition"));
+    expect(inventory.intents).toEqual(capabilitiesOfKind("intent"));
+    expect(inventory.formats).toEqual(capabilitiesOfKind("format"));
+    // The two the old literal omitted.
+    const ids = inventory.compositions.map((composition) => composition.id);
+    expect(ids).toContain("architecture");
+    expect(ids).toContain("architecture-map");
+    // Every maturity value used is explained in the same payload.
+    for (const composition of [...inventory.compositions, ...inventory.intents]) {
+      expect(Object.keys(inventory.maturity), composition.id).toContain(composition.maturity);
+    }
+  });
+});

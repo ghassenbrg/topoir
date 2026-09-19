@@ -240,8 +240,16 @@ describe("review regression: paint and font resolution", () => {
 });
 
 describe("review regression: intent and selection honesty", () => {
-  // Owning tasks: T04 (classify honestly now), T12 (implement focus).
-  it.fails("either applies group focus or reports it as not applied", async () => {
+  /**
+   * Owning tasks: T04 (classify honestly — done), T12 (implement boundary focus).
+   *
+   * The defect was not that boundary focus is unimplemented; it was that it was accepted
+   * silently, so a caller could not tell "focus applied" from "focus ignored" without
+   * diffing two drawings. The contract T04 owns is the disjunction: the intent is either
+   * executed, or reported as not executed. Asserting only the first half would demand
+   * T12's work from T04 and leave the honesty gap untested.
+   */
+  it("either applies group focus or reports it as not applied", async () => {
     const source = await fixture("group-focus");
     const compiler = new TopoIRCompiler();
     const focused = await compiler.compile(source, { source: "group-focus.topoir.yaml", format: "svg" });
@@ -253,12 +261,30 @@ describe("review regression: intent and selection honesty", () => {
     const unfocusedSvg = unfocused.artifacts[0]?.sha256;
     expect(focusedSvg).toBeDefined();
     expect(unfocusedSvg).toBeDefined();
-    // Accepting `focus` and producing a byte-identical drawing, with no diagnostic
-    // saying the intent was advisory, is the defect.
-    if (focusedSvg === unfocusedSvg) {
-      expect(focused.diagnostics.map((diagnostic) => diagnostic.code)).not.toHaveLength(0);
+
+    if (focusedSvg !== unfocusedSvg) {
+      // Applied. Nothing to report, and T12 has landed — tighten this branch then.
+      return;
     }
-    expect(focusedSvg).not.toBe(unfocusedSvg);
+
+    // Not applied, so it has to be reported, and the report has to be specific enough to
+    // act on: which view, which boundary, and that the drawing does not reflect it.
+    const reported = focused.diagnostics.filter((diagnostic) => diagnostic.code === "TOP252_INTENT_NOT_APPLIED");
+    expect(reported).toHaveLength(1);
+    expect(reported[0]?.message).toContain("focused");
+    expect(reported[0]?.message).toContain("platform");
+    // And the unfocused document must not carry the diagnostic, or it means nothing.
+    expect(unfocused.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("TOP252_INTENT_NOT_APPLIED");
+  });
+
+  /**
+   * Focusing a component is implemented, so it must not be reported as unapplied.
+   * Without this, the honest-reporting fix could degenerate into warning about all focus.
+   */
+  it("does not report component focus as unapplied", async () => {
+    const source = (await fixture("group-focus")).replace("        - platform", "        - api");
+    const result = await new TopoIRCompiler().compile(source, { source: "component-focus.topoir.yaml", format: "svg" });
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("TOP252_INTENT_NOT_APPLIED");
   });
 
   // Owning tasks: T04 (document), T11 (exact selection mode).

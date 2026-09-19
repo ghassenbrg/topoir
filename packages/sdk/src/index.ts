@@ -5,6 +5,7 @@ import {
   analyzeGeometry,
   analyzeVisibility,
   fontDiagnostic,
+  intentDiagnostics,
   loadDocument,
   measureView,
   projectView,
@@ -222,6 +223,9 @@ export class TopoIRCompiler {
       // Paint the view actually uses has to be readable and has to be real colour.
       const visibility = analyzeVisibility(view, theme);
       diagnostics.push(...visibility.diagnostics);
+      // Intent this build accepts but does not execute is reported, so a caller can tell
+      // "applied" from "ignored" without diffing two drawings.
+      diagnostics.push(...intentDiagnostics(view));
 
       const measured = measureView(view, theme, options.textMeasurer, (reference) => assets.resolve(reference));
       for (const node of measured.nodes) {

@@ -9,7 +9,37 @@ pnpm build
 pnpm benchmark:references
 ```
 
-This compiles the six mapped candidates twice, writes SVG/PNG, records source/reference/artifact hashes, diagnostics and quality metrics, and builds `.tmp/reference-benchmark/report.md` with each reference followed by its generated candidate. Reference screenshots remain private, ignored inputs; a public checkout can run the generated fixtures but cannot receive reference approval without the originals. The default exit status checks successful compilation and determinism, **not visual parity**. `--require-parity` fails until a reviewed parity gate is implemented and satisfied.
+This compiles the six mapped candidates twice, writes SVG/PNG, records source/reference/artifact hashes, diagnostics and quality metrics, and builds `.tmp/reference-benchmark/report.md` with each reference followed by its generated candidate. Reference screenshots remain private, ignored inputs; a public checkout can run the generated fixtures but cannot receive reference approval without the originals. The default exit status checks successful compilation and determinism, **not visual parity**. `--require-parity` fails unless every case is approved by a live review record.
+
+## Recording a review
+
+Parity is decided by `benchmarks/reference-reviews.json`, not by a constant in the harness. Each record binds one human decision to the sha256 of the exact reference image and generated candidate it was made against:
+
+```json
+{
+  "case": "ref-01-event-flow",
+  "verdict": "approved",
+  "reviewer": "Name of the person who looked",
+  "date": "2026-09-20",
+  "referenceSha256": "…",
+  "candidateSha256": "…",
+  "notes": "Why."
+}
+```
+
+Both hashes are printed in `.tmp/reference-benchmark/report.json`. The resulting status is one of:
+
+| Status | Meaning |
+| --- | --- |
+| `approved` | A record approves exactly these two artifacts |
+| `rejected` | A record rejects exactly these two artifacts |
+| `stale` | A record exists, but the reference or the candidate has changed since. Re-review is required |
+| `unreviewed` | No record exists for this case |
+| `unreviewable` | The private reference image is not in this checkout, so no review is possible here |
+
+Only `approved` counts as parity. A regenerated candidate invalidates its record automatically, so an approval can never be carried forward onto a picture nobody looked at.
+
+**Only the person who did the comparison may add a record.** The compiler never writes to this file, and an agent must never add one on a human's behalf — a fabricated approval defeats the entire benchmark. At present the file contains no records, and a test asserts that, so the current honest status of all six cases is `unreviewed`.
 
 The durable mapping is [`benchmarks/reference-cases.json`](../benchmarks/reference-cases.json). Its explicit `coverage` and `gaps` prevent partial capability examples from being mistaken for full reconstructions. Five cases are currently partial; Pockito reconstructs the semantic graph but not its complete visual composition. These are baseline measurements, not six completed reproductions.
 

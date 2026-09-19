@@ -49,6 +49,7 @@ Stages are stable JSON intended for diagnostics and tooling. Geometry is compile
 
 ```bash
 topoir schema
+topoir capabilities
 topoir icons list --json
 topoir icons search database
 topoir assets search payments --assets ./topoir-assets --json
@@ -57,6 +58,20 @@ topoir doctor
 ```
 
 `doctor` performs an in-memory schema/layout/SVG/PNG compile and reports the Node/platform tuple. It does not read network resources.
+
+`capabilities` lists every composition, intent, style and output format this build exposes,
+each with the maturity it has actually reached:
+
+| Maturity | Meaning |
+| --- | --- |
+| `implemented` | Works, and its quality is covered by the benchmarks |
+| `experimental` | Produces output, but is not covered by a family acceptance gate |
+| `advisory` | Accepted and recorded; deliberately does not change the drawing |
+| `unsupported` | Accepted by the schema but not executed. Using it is reported as `TOP252_INTENT_NOT_APPLIED` |
+
+The MCP `topoir://docs/design` inventory is generated from the same table, so the two
+surfaces cannot disagree about what the tool can do, and a test holds the composition list
+against the schema's own enum.
 
 `assets` and `icons` search the offline inventory; custom assets join it when `--assets` is supplied. `styles` returns visual-language metadata as JSON. Prefer narrow searches over dumping thousands of icons into an agent context. See [asset documentation](assets.md) for metadata format and license boundaries.
 

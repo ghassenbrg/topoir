@@ -1,7 +1,7 @@
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { dirname, extname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { TopoIRCompiler, TOPOIR_VERSION, AssetRegistry, discoverAssets, themes, type CompileArtifact } from "@topoir/sdk";
+import { TopoIRCompiler, TOPOIR_VERSION, AssetRegistry, capabilities, capabilitiesOfKind, discoverAssets, themes, type CompileArtifact } from "@topoir/sdk";
 import { SUPPORTED_NODE_KINDS, topoirSchema, type Diagnostic } from "@topoir/schema";
 
 export interface CliIO {
@@ -55,6 +55,11 @@ export async function runCli(argv: readonly string[], io: CliIO = defaultIO): Pr
         return await iconsCommand(rest, io);
       case "styles":
         io.stdout.write(`${JSON.stringify(themes.map(({ id, language }) => ({ id, language })), null, 2)}\n`);
+        return 0;
+      case "capabilities":
+        // Generated from the one capability registry the MCP server also reads, so the
+        // two surfaces cannot disagree about what this build can do.
+        io.stdout.write(`${JSON.stringify({ version: TOPOIR_VERSION, capabilities: capabilities() }, null, 2)}\n`);
         return 0;
       case "doctor":
         return await doctorCommand(rest, io);
@@ -338,6 +343,7 @@ Usage:
   topoir render <file|-> [-o path|-] [-f svg|png|both] [-V view|all] [--manifest]
   topoir inspect <file|-> [--stage model|view|geometry|metrics|manifest] [-V view]
   topoir schema
+  topoir capabilities
   topoir icons list [--json]
   topoir icons search <query> [--json]
   topoir doctor
@@ -355,6 +361,11 @@ function isUsageFailure(error: unknown): boolean {
 
 /** Per-command usage, so `topoir <command> --help` answers instead of failing. */
 const COMMAND_USAGE: Record<string, string> = {
+  capabilities: `topoir capabilities
+
+List every composition, intent, style and output format this build exposes, each with the
+maturity it has actually reached: implemented, experimental, advisory or unsupported. The
+MCP design inventory is generated from the same table, so the two cannot disagree.`,
   validate: `topoir validate <file|-> [--json] [--warnings-as-errors] [--assets <directory>]
 
 Parse, structurally validate and check semantic references.`,

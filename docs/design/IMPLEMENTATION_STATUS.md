@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-19. This file is the live execution ledger for the design program.
 
-**Program state: in progress. Next task: T04. Current milestone: M0 (T00–T04).**
+**Program state: in progress. M0 complete. Next task: T05. Current milestone: M1 (T05–T09).**
 
 The full review previously verified `bc64cf2`: 91 tests in 15 files passed; 240/240 synthetic cases compiled without hard geometry defects; 220/240 passed the selected defect counters; six reference candidates were deterministic with no approved parity recorded. These are historical baseline observations, not evidence that the tasks below are implemented. The design-writing task added documents/examples only.
 
@@ -14,7 +14,7 @@ Allowed task states: `not_started`, `in_progress`, `implemented_pending_gate`, `
 | T01 | M0 | complete | Six asset roles, measured badges, declared abbreviation. `TOP440_TEXT_ABBREVIATED` added. See session entry. |
 | T02 | M0 | complete | Resolved font contract, token-based theme inheritance, contrast and colour diagnostics. `TOP330`/`TOP331`/`TOP442` added. See session entry. |
 | T03 | M0 | complete | Attachment/bounds/coverage/nesting checks, explicit raster dimensions, output-name preflight. Found and fixed a real endpoint-detaching routing bug. See session entry. |
-| T04 | M0 | not_started | |
+| T04 | M0 | complete | Capability registry behind CLI+MCP, `TOP252_INTENT_NOT_APPLIED`, hash-bound review records, benchmark counter/shape/acceptance separation, generator consolidation. See session entry. |
 | T05 | M1 | not_started | |
 | T06 | M1 | not_started | |
 | T07 | M1 | not_started | |
@@ -55,7 +55,7 @@ Allowed task states: `not_started`, `in_progress`, `implemented_pending_gate`, `
 
 | Gate | State | Required evidence |
 | --- | --- | --- |
-| M0 trustworthy baseline | in_progress | T00–T04 corrections and honest reports |
+| M0 trustworthy baseline | complete | T00–T04 complete; all 12 reproduced review defects fixed or explicitly diagnosed; 189 tests pass; benchmark claims match measured evidence. See the M0 gate entry. |
 | M1 shared components/scene | not_started | Single measured contract and complete visible accounting |
 | M2 versioned presentation | not_started | Schema/migration/constraints/registry and examples agree |
 | M3 architecture quality | not_started | T20 corpus and actual review decisions |
@@ -370,3 +370,89 @@ This is recorded as a fix, not a tolerance change. Widening the attachment toler
 **Outstanding gates.** M0 gate still open pending T04. No human visual review obtained or claimed.
 
 **Next ready task: T04** (honest discovery and benchmark reporting), the last M0 task. Its dependency T00 is complete and its `group-focus` probe is in place and failing as intended.
+
+### T04 — honest discovery and benchmark reporting — 2026-09-20
+
+**Task: T04 — honest discovery and benchmark reporting. State: complete.**
+
+Baseline commit `ae1ad41` (T03). No unrelated worktree changes.
+
+**Behavior implemented.**
+
+1. **One capability registry behind every discovery surface.** MCP design discovery was a hand-maintained literal listing five compositions while the schema accepted seven; it omitted `architecture` — the default for system diagrams — and `architecture-map`, both implemented. New `core/src/capabilities.ts` is the single table, and both the MCP `topoir://docs/design` resource and a new `topoir capabilities` command are generated from it. A test holds the advertised composition list against the schema's own enum **in both directions**, so a composition cannot be added to the schema without appearing in discovery, and cannot be advertised without existing in the schema.
+
+2. **Maturity is stated, and `advisory` is distinguished from `unsupported`.** Every capability declares `implemented`, `experimental`, `advisory` or `unsupported`. The distinction is deliberate: advisory metadata such as `design.audience` is doing its job when it changes nothing, whereas unsupported intent is a gap the caller is entitled to know about. Anything not yet implemented must name its owning task, which a test enforces.
+
+3. **Accepted-but-inert intent is reported.** Focusing a group produced a byte-identical SVG with no diagnostic, so a caller could not tell "applied" from "ignored" without diffing two drawings. `TOP252_INTENT_NOT_APPLIED` names the view and every unapplied boundary. Focusing a *component* is implemented and is deliberately not reported — asserted, so the fix cannot degenerate into warning about all focus.
+
+4. **Reference parity is a decision procedure, not a constant.** The benchmark wrote the literal string `"NOT MET — documented gaps; human review required"` for every case and set `process.exitCode = 1` unconditionally under `--require-parity`. That is honest about the present state but it is not a *mechanism*: recording a genuine human approval could not change it, and a regression could not be caught by it. New `benchmarks/review-records.mts` derives parity from `benchmarks/reference-reviews.json`, where each record binds one human decision to the sha256 of the exact reference image and candidate it was made against. Status is now `approved`, `rejected`, `stale`, `unreviewed` or `unreviewable`, each with a reason. Only `approved` counts. A regenerated candidate invalidates its record automatically, so an approval can never be carried forward onto a picture nobody looked at.
+
+5. **Geometry counters, shape and acceptance are reported separately.** The generalization report now states "free of hard geometry defects", "free of every measured defect" and "within 3x of the requested shape" as three different numbers, followed by an explicit statement that **none of them is presentation acceptance**. The reference report separates `cleanGeometry` from `shapeOnTarget` for the first time, which immediately surfaced that `ref-05-conceptual-sketch` is off-target — information the old single flag hid.
+
+6. **An absent metric is unknown, not zero.** Both benchmarks folded missing counters in as `?? 0`, so an unimplemented or removed check would have read as a clean result. A missing counter is now recorded as unavailable and the report says so in the table and in a callout. Verified by temporarily adding a counter name the compiler does not emit: it printed `unavailable — not reported by the compiler` rather than `0`.
+
+7. **One synthetic generator.** `benchmarks/generalization.mts` carried a private, byte-identical copy of `rng` and `build` alongside `benchmarks/generate-case.mts`. They agreed today, but the corpus the benchmark measured and the corpus the test suite asserted against could have drifted apart without either noticing. 8,188 characters of duplication removed; the benchmark now imports the shared generator, and case-0006 reproduces identically.
+
+**Files changed:**
+
+- `packages/core/src/capabilities.ts` (new) — the registry, `intentDiagnostics`, `schemaCompositions`
+- `packages/core/src/index.ts` — export it
+- `packages/sdk/src/index.ts` — run `intentDiagnostics`
+- `packages/cli/src/index.ts` — `topoir capabilities` plus help and per-command usage
+- `packages/mcp/src/index.ts` — design inventory generated from the registry
+- `packages/schema/src/diagnostics.ts` — `TOP252_INTENT_NOT_APPLIED`
+- `benchmarks/review-records.mts` (new), `benchmarks/reference-reviews.json` (new, **empty**)
+- `benchmarks/reference-quality.mts` — real parity, counter/shape separation, unknown-vs-zero
+- `benchmarks/generalization.mts` — shared generator, new counters, unknown-vs-zero, three-way reporting
+- `packages/core/test/capabilities.test.ts` (new), `packages/sdk/test/review-records.test.ts` (new)
+- `packages/cli/test/cli.test.ts`, `packages/mcp/test/mcp.test.ts` — both surfaces asserted against the registry
+- `docs/cli.md`, `docs/diagnostics.md`, `docs/visual-benchmark.md`
+
+**The last T00 probe resolved.** `either applies group focus or reports it as not applied` is promoted to `it`. Its shape was corrected while being promoted: the original ended with an unconditional `expect(focusedSvg).not.toBe(unfocusedSvg)`, which demands T12's implementation work from T04 and leaves the honesty gap — the thing T04 actually owns — untested. It is now the genuine disjunction the contract states, with the unapplied branch asserting the specific code, the named view, the named boundary, and that an unfocused document does *not* carry the diagnostic. A second case asserts component focus is not reported.
+
+**No fabricated approval.** `benchmarks/reference-reviews.json` contains zero records, and `packages/sdk/test/review-records.test.ts` asserts that it does, so a fabricated approval cannot be committed without deliberately editing that expectation. The record mechanism itself is verified by unit tests over `parityOf`: a valid record approves, a rejection stays a rejection, a changed candidate or a changed reference goes stale, one case's record cannot approve another, and only `approved` satisfies `parityMet`.
+
+**Verification:**
+
+| Command | Outcome |
+| --- | --- |
+| `pnpm check` | build + typecheck clean; **189 tests in 21 files passed** (165 after T03) |
+| `pnpm benchmark:references` | 6/6 deterministic and clean; **approved 0/6**, all six `unreviewed` with the reason stated; `ref-05` newly shown as `shapeOnTarget: false` |
+| `pnpm benchmark:generalization` | 240 cases; hard defects 0/240; every measured defect clean 220/240 (91.7%); within 3x of requested shape 216/240 (90.0%); **all five new T03 counters total 0 across the corpus** |
+| render comparison | all 20 example and showcase renders byte-identical |
+| unknown-metric probe | a counter the compiler does not emit prints `unavailable`, not `0` |
+
+The five T03 counters reading 0 across 240 generated cases is independent evidence that the new integrity checks do not false-positive on ordinary output.
+
+**Design decisions.** No contract changed, so `DECISIONS.md` is untouched. One judgement worth recording: `topoir capabilities` was added as a new command rather than extending `topoir styles`, because styles returns visual-language metadata for one capability kind and the registry covers four. The roadmap's rule that a promised command must exist before anything relies on it is satisfied — the command, its help text, its documentation and its tests landed together.
+
+**Remaining defects.** All 12 reproduced review defects are now fixed or explicitly diagnosed. Two carry a deliberate partial resolution, recorded rather than hidden: boundary focus is *reported* but not *applied* (T12), and edge selection remains induced-only, with a contract-record test pinning the behavior until T11 adds an exact mode. `examples/rendered/showcase/custom-assets.png` remains stale from before T01 — a pre-existing discrepancy T01–T04 do not affect and did not silently re-baseline.
+
+### M0 gate — trustworthy baseline — 2026-09-20
+
+**Gate: M0. State: complete.**
+
+Exit criterion: "T00–T04 complete, all reproduced failures fixed or explicitly diagnosed, existing supported examples remain usable, and baseline claims accurately describe measured evidence."
+
+| Review defect | Resolution | Evidence |
+| --- | --- | --- |
+| Six asset roles, five drawn | Fixed | 6 images drawn; role identity is the authored reference, not the resolved asset |
+| Valid badge overflows the artifact | Fixed | Measured before layout; wraps inside the node; drawn lines rejoin to the authored badge |
+| Labels silently abbreviated | Diagnosed | `TOP440_TEXT_ABBREVIATED` with an exact character count; disposition on the measurement |
+| Unreadable paint accepted | Fixed | `TOP442_TEXT_NOT_LEGIBLE`, error severity, `ok: false` |
+| Font not a resolved contract | Fixed | `TOP330_FONT_UNAVAILABLE`; scene, measurement and embedded faces name one family |
+| Theme extension loses treatment | Fixed | Empty extension is **byte-identical** to its base |
+| Accepted intent with no effect | Diagnosed | `TOP252_INTENT_NOT_APPLIED`; `advisory` vs `unsupported` separated in discovery |
+| Edge selection is closure-based | Documented | Contract-record test; exact mode is T11 |
+| No endpoint attachment check | Fixed | `TOP426_EDGE_ENDPOINT_DETACHED`; found and fixed a real routing bug |
+| Dropped group / annotation undetected | Fixed | `TOP415_REGION_DROPPED`, `TOP416_ANNOTATION_DROPPED` |
+| PNG logical vs pixel size conflated | Fixed | Separate explicit fields, read from the PNG header |
+| Discovery omits implemented choices | Fixed | Generated from one registry, held against the schema enum in both directions |
+
+**Existing examples remain usable:** all 11 example and all 9 showcase renders are byte-identical to the goldens across the whole of M0, with one deliberate, inspected and explained exception (`paired-regions.png`, one node widened 1.3px so its badge strip contains its own text; canvas dimensions unchanged).
+
+**Baseline claims now match measured evidence:** 189 tests from 91; hard geometry defects 0/240; every-measured-defect clean 220/240; shape on target 216/240; reference parity **approved 0/6**, honestly `unreviewed` rather than a hardcoded string.
+
+**Outstanding gate, not satisfied and not claimed:** no human visual review of the six reference cases has been obtained. All six are `unreviewed`. `--require-parity` fails, correctly. Granting parity requires a person to compare the artifacts and add a record; an agent must not add one on their behalf.
+
+**Next ready task: T05** (define internal V2 component/scene interfaces), which opens M1. Its dependencies T01, T02 and T03 are complete.
