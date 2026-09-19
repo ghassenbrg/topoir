@@ -841,11 +841,13 @@ function nudgeCoincidentSegments(view: MeasuredView, geometry: GeometryView): Ge
       const first = edges[left]!;
       const second = edges[right]!;
       const firstSegments = first.points.slice(1).map((point, i) => [first.points[i]!, point] as [Point, Point]);
-      for (let index = 1; index < second.points.length - 1; index += 1) {
+      // A segment is interior only when both of its points are, so this starts at 2: at
+      // index 1 the moved point is `points[0]`, the endpoint anchored to its component.
+      // Shifting that detached the connector from the component it claims to connect,
+      // by exactly `step` px, which the endpoint-attachment check now catches.
+      for (let index = 2; index < second.points.length - 1; index += 1) {
         const start = second.points[index - 1]!;
         const end = second.points[index]!;
-        // An end segment carries the arrow head, so it stays where the author's component is.
-        if (index === 1 && second.points.length <= 3) continue;
         if (sharedLength(start, end, firstSegments) < minimum) continue;
         const { obstacles, crossOnce } = context.get(second.id)!;
         // Moving a segment must not push the route in or out of a boundary it already

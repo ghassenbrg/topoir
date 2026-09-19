@@ -272,8 +272,8 @@ describe("review regression: intent and selection honesty", () => {
 });
 
 describe("review regression: artifact integrity", () => {
-  // Owning task: T03. Baseline: metadata said 360x226 while PNG IHDR said 720x452.
-  it.fails("reports raster dimensions that match the PNG header", async () => {
+  // Owning task: T03 (fixed). Baseline: metadata said 360x226 while PNG IHDR said 720x452.
+  it("reports raster dimensions that match the PNG header", async () => {
     const source = await fixture("long-label");
     const result = await new TopoIRCompiler().compile(source, {
       source: "long-label.topoir.yaml",
@@ -283,12 +283,34 @@ describe("review regression: artifact integrity", () => {
     const png = result.artifacts.find((artifact) => artifact.format === "png");
     if (png === undefined) throw new Error("no png artifact");
     const bytes = Buffer.from(png.content as Uint8Array);
-    expect([png.width, png.height]).toEqual([bytes.readUInt32BE(16), bytes.readUInt32BE(20)]);
+    const header = [bytes.readUInt32BE(16), bytes.readUInt32BE(20)];
+
+    // The raster fields describe the bytes the caller actually received.
+    expect([png.pixelWidth, png.pixelHeight]).toEqual(header);
+    // The logical fields describe the drawing's own coordinate space, unscaled.
+    expect([png.logicalWidth, png.logicalHeight]).not.toEqual(header);
+    expect(png.scale).toBe(2);
+    expect(png.pixelWidth).toBeCloseTo(png.logicalWidth * 2, 0);
+    // The legacy fields keep their old meaning for existing callers.
+    expect([png.width, png.height]).toEqual([png.logicalWidth, png.logicalHeight]);
+    // And the manifest agrees with the artifact.
+    const entry = result.manifest?.artifacts.find((item) => item.format === "png");
+    expect([entry?.pixelWidth, entry?.pixelHeight]).toEqual(header);
+  });
+
+  // Owning task: T03 (fixed). An SVG has no raster size of its own, so it claims none.
+  it("does not invent raster dimensions for an SVG", async () => {
+    const { result } = await compileFixture("long-label");
+    const svg = result.artifacts.find((artifact) => artifact.format === "svg");
+    expect(svg?.pixelWidth).toBeUndefined();
+    expect(svg?.pixelHeight).toBeUndefined();
+    expect(svg?.scale).toBeUndefined();
+    expect(svg?.logicalWidth).toBe(svg?.width);
   });
 
   // Owning task: T03. A hostile backend returning detached routes must be rejected.
   // Baseline: only an incidental TOP423 boundary warning fired, and `ok` stayed true.
-  it.fails("rejects routes translated away from the nodes they connect", async () => {
+  it("rejects routes translated away from the nodes they connect", async () => {
     const detached = await compileWithGeometry("annotated-regions", (geometry) => ({
       ...geometry,
       edges: geometry.edges.map((edge) => ({
@@ -306,7 +328,7 @@ describe("review regression: artifact integrity", () => {
   });
 
   // Owning task: T03. Dropping a declared group from the geometry must be a coverage failure.
-  it.fails("rejects geometry that drops a declared group", async () => {
+  it("rejects geometry that drops a declared group", async () => {
     const dropped = await compileWithGeometry("annotated-regions", (geometry) => ({ ...geometry, groups: [] }));
     const view = dropped.views[0];
     if (view === undefined) throw new Error("dropped-group probe produced no view");
@@ -316,7 +338,7 @@ describe("review regression: artifact integrity", () => {
   });
 
   // Owning task: T03. Dropping a declared annotation from the geometry must be a coverage failure.
-  it.fails("rejects geometry that drops a declared annotation", async () => {
+  it("rejects geometry that drops a declared annotation", async () => {
     const dropped = await compileWithGeometry("annotated-regions", (geometry) => ({ ...geometry, annotations: [] }));
     const view = dropped.views[0];
     if (view === undefined) throw new Error("dropped-annotation probe produced no view");
@@ -325,13 +347,33 @@ describe("review regression: artifact integrity", () => {
     expect(dropped.ok).toBe(false);
   });
 
-  // Owning task: T03. Two view ids differing only by case collide on a case-insensitive target.
-  it.fails("reports view ids whose output file names collide", async () => {
-    const { result } = await compileFixture("colliding-view-ids", { view: "all" });
+  // Owning task: T03 (fixed). Two view ids differing only by case collide on a
+  // case-insensitive target, which is the macOS and Windows default.
+  it("reports view ids whose output file names collide", async () => {
+    const source = await fixture("colliding-view-ids");
+    const result = await new TopoIRCompiler().compile(source, {
+      source: "colliding-view-ids.topoir.yaml",
+      format: "svg",
+      view: "all",
+    });
+    const reported = result.diagnostics.filter((diagnostic) => diagnostic.code === "TOP121_OUTPUT_NAME_COLLISION");
+    expect(reported).toHaveLength(1);
+    expect(reported[0]?.severity).toBe("error");
+    expect(reported[0]?.message).toContain("Overview");
+    expect(reported[0]?.message).toContain("overview");
+    expect(result.ok).toBe(false);
+    // Preflight: nothing was produced, so nothing could have been written over.
+    expect(result.artifacts).toEqual([]);
+  });
+
+  // Owning task: T03 (fixed). Distinct names still compile, so the check is not a blanket ban.
+  it("still compiles views whose output names do not collide", async () => {
+    const source = (await fixture("colliding-view-ids")).replace("  - id: Overview", "  - id: summary");
+    const result = await new TopoIRCompiler().compile(source, { source: "distinct.topoir.yaml", format: "svg", view: "all" });
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("TOP121_OUTPUT_NAME_COLLISION");
     const names = result.artifacts.map((artifact) => artifact.fileName);
-    const folded = new Set(names.map((name) => name.toLowerCase()));
-    // Two distinct views must not share an output file name on a case-insensitive filesystem.
-    expect(folded.size).toBe(names.length);
+    expect(names).toHaveLength(2);
+    expect(new Set(names.map((name) => name.toLowerCase())).size).toBe(2);
   });
 });
 
@@ -350,4 +392,36 @@ describe("review regression: macro composition", () => {
     // The shape is at least reported rather than silently accepted as on-target.
     expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain("TOP433_ASPECT_OFF_TARGET");
   });
+});
+
+describe("review regression: routing refinement", () => {
+  /**
+   * `nudgeCoincidentSegments` in the composition engine documents that "only interior
+   * segments move, so neither route leaves its endpoints", but it shifted
+   * `points[index - 1]`, and at index 1 that is `points[0]` — the endpoint anchored to its
+   * component. Generated case 6 produced a connector starting exactly `step` (11px) clear
+   * of its source, which reads as an arrow floating in space.
+   *
+   * The defect was invisible until T03 added endpoint-attachment checking, and nothing in
+   * the published examples triggered it. Nudging is a refinement: it may leave two
+   * connectors sharing a corridor, but it may never buy a lower coincidence count by
+   * detaching a connector from the component it connects.
+   *
+   * These seeds are the generated cases whose coincidence counts the nudge pass was
+   * changing, so they are the ones that exercise it.
+   */
+  it("never nudges a route end off the component it connects", async () => {
+    const { build } = await import("../../../benchmarks/generate-case.mts");
+    const compiler = new TopoIRCompiler();
+    for (const seed of [6, 43, 177, 181, 203, 211]) {
+      const compiled = await compiler.compile(JSON.stringify(build(seed).document), { format: "svg" });
+      for (const view of compiled.views) {
+        expect(view.metrics.detachedEndpoints, `seed ${seed}`).toBe(0);
+      }
+      expect(
+        compiled.diagnostics.map((diagnostic) => diagnostic.code),
+        `seed ${seed}`,
+      ).not.toContain("TOP426_EDGE_ENDPOINT_DETACHED");
+    }
+  }, 180_000);
 });

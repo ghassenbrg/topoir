@@ -21,6 +21,14 @@ export interface QualityReport {
     readonly droppedRelationships: number;
     readonly droppedComponents: number;
     readonly droppedLabels: number;
+    readonly droppedRegions: number;
+    readonly droppedAnnotations: number;
+    /** Route ends that do not meet the component they claim to connect. */
+    readonly detachedEndpoints: number;
+    /** Marks placed outside the declared canvas, which export crops away. */
+    readonly outOfBoundsObjects: number;
+    /** Boundaries escaping a parent, or unrelated boundaries containing one another. */
+    readonly regionNestingErrors: number;
     readonly illegalBoundaryCrossings: number;
     readonly labelOverlaps: number;
     readonly annotationOverlaps: number;
@@ -59,7 +67,14 @@ export function analyzeGeometry(view: MeasuredView, geometry: GeometryView): Qua
   let labelOverlaps = 0;
   let annotationOverlaps = 0;
   let groupTitleIntersections = 0;
+  let detachedEndpoints = 0;
+  let outOfBounds = 0;
+  let regionNestingErrors = 0;
   const headings = geometry.groups.map((group) => ({ ...group, height: view.groups.find((g) => g.id === group.id)?.titleHeight ?? 38 }));
+  // In a sequence, a message meets a participant's lifeline — the vertical line descending
+  // from its header — not the header box itself. That is a different attachment surface,
+  // not an exemption: a message still has to land on the line it claims.
+  const lifelines = view.design?.composition === "sequence";
 
   for (let leftIndex = 0; leftIndex < geometry.nodes.length; leftIndex += 1) {
     const left = geometry.nodes[leftIndex];
@@ -105,6 +120,19 @@ export function analyzeGeometry(view: MeasuredView, geometry: GeometryView): Qua
   for (const edge of droppedLabels) {
     diagnostics.push(error("TOP414_EDGE_LABEL_DROPPED", `Edge ${JSON.stringify(edge.id)} declares a label but none was placed, so the connector is drawn unexplained.`));
   }
+  // Boundaries and notes are declared content on the same footing as components and
+  // relationships. Without these two checks a backend could return geometry with every
+  // group or every annotation missing and still be reported as a clean diagram — which
+  // the review confirmed by injecting exactly that.
+  const droppedGroups = view.groups.filter((group) => !groupById.has(group.id));
+  for (const group of droppedGroups) {
+    diagnostics.push(error("TOP415_REGION_DROPPED", `Group ${JSON.stringify(group.id)} was not placed and is missing from the diagram.`));
+  }
+  const placedAnnotationIds = new Set(geometry.annotations.map((annotation) => annotation.id));
+  const droppedAnnotations = view.annotations.filter((annotation) => !placedAnnotationIds.has(annotation.id));
+  for (const annotation of droppedAnnotations) {
+    diagnostics.push(error("TOP416_ANNOTATION_DROPPED", `Annotation ${JSON.stringify(annotation.id)} was not placed, so the explanation it carries is missing from the diagram.`));
+  }
 
   for (const edgeGeometry of geometry.edges) {
     const edge = view.edges.find((candidate) => candidate.id === edgeGeometry.id);
@@ -112,6 +140,32 @@ export function analyzeGeometry(view: MeasuredView, geometry: GeometryView): Qua
       emptyRoutes += 1;
       diagnostics.push(error("TOP420_EDGE_ROUTE_EMPTY", `Edge ${JSON.stringify(edgeGeometry.id)} has no usable route.`));
       continue;
+    }
+
+    // A route has to actually touch the components it claims to connect. Nothing checked
+    // this: translating every point far away from its nodes produced no attachment
+    // diagnostic at all, so a custom layout backend could return disconnected connectors
+    // and still be reported as clean geometry.
+    if (edge !== undefined) {
+      const first = edgeGeometry.points[0];
+      const last = edgeGeometry.points[edgeGeometry.points.length - 1];
+      for (const [end, nodeId, role] of [
+        [first, edge.from, "source"],
+        [last, edge.to, "target"],
+      ] as const) {
+        const node = nodeById.get(nodeId);
+        if (node === undefined || end === undefined) continue;
+        const gap = distanceToAttachment(end, node, lifelines);
+        if (gap > ATTACHMENT_TOLERANCE) {
+          detachedEndpoints += 1;
+          diagnostics.push(
+            error(
+              "TOP426_EDGE_ENDPOINT_DETACHED",
+              `Edge ${JSON.stringify(edgeGeometry.id)} does not meet its ${role} ${JSON.stringify(nodeId)}: the route ends ${Math.round(gap)}px away from ${lifelines ? "its lifeline" : "it"}, so the connector is drawn floating free.`,
+            ),
+          );
+        }
+      }
     }
     for (const [start, end] of segments(edgeGeometry)) {
       if (!isOrthogonal(start, end)) {
@@ -183,6 +237,72 @@ export function analyzeGeometry(view: MeasuredView, geometry: GeometryView): Qua
     }
   }
 
+  // Everything drawn has to be inside the canvas the artifact declares. A mark outside it
+  // is cropped away at export with no trace in the result, which is indistinguishable from
+  // never having drawn it.
+  const canvas = geometry.bounds;
+  const reportOutOfBounds = (id: string, what: string, rect: Rect): void => {
+    if (withinBounds(rect, canvas)) return;
+    outOfBounds += 1;
+    diagnostics.push(
+      error(
+        "TOP417_GEOMETRY_OUT_OF_BOUNDS",
+        `${what} ${JSON.stringify(id)} lies outside the ${Math.round(canvas.width)}x${Math.round(canvas.height)} canvas, so it is cropped out of the artifact.`,
+      ),
+    );
+  };
+  for (const node of geometry.nodes) reportOutOfBounds(node.id, "Node", node);
+  for (const group of geometry.groups) reportOutOfBounds(group.id, "Group", group);
+  for (const annotation of geometry.annotations) reportOutOfBounds(annotation.id, "Annotation", annotation);
+  for (const edgeGeometry of geometry.edges) {
+    const outside = edgeGeometry.points.filter((point) => !withinBounds({ ...point, width: 0, height: 0 }, canvas));
+    if (outside.length === 0) continue;
+    outOfBounds += 1;
+    diagnostics.push(
+      error(
+        "TOP417_GEOMETRY_OUT_OF_BOUNDS",
+        `Edge ${JSON.stringify(edgeGeometry.id)} has ${outside.length} of ${edgeGeometry.points.length} route points outside the ${Math.round(canvas.width)}x${Math.round(canvas.height)} canvas, so part of the connector is cropped out of the artifact.`,
+      ),
+    );
+  }
+
+  // Regions nest or sit apart; they never half-overlap. A child boundary escaping its
+  // parent, or two unrelated boundaries interpenetrating, both read as a containment
+  // claim the model never made.
+  for (const group of view.groups) {
+    if (group.parent === undefined) continue;
+    const childRect = groupById.get(group.id);
+    const parentRect = groupById.get(group.parent);
+    if (childRect !== undefined && parentRect !== undefined && !contains(parentRect, childRect, 0.01)) {
+      regionNestingErrors += 1;
+      diagnostics.push(
+        error("TOP418_REGION_OUTSIDE_PARENT", `Group ${JSON.stringify(group.id)} is not contained by its parent ${JSON.stringify(group.parent)}.`),
+      );
+    }
+  }
+  for (let leftIndex = 0; leftIndex < geometry.groups.length; leftIndex += 1) {
+    const left = geometry.groups[leftIndex];
+    if (left === undefined) continue;
+    for (let rightIndex = leftIndex + 1; rightIndex < geometry.groups.length; rightIndex += 1) {
+      const right = geometry.groups[rightIndex];
+      if (right === undefined) continue;
+      // Ancestry is allowed to overlap: that is what containment looks like.
+      if (isRelatedGroup(left.id, right.id, view.groups)) continue;
+      if (!rectsOverlap(left, right, 0.01)) continue;
+      // Full containment of an unrelated region is the strong signal; partial clipping at
+      // the very edge is left to the existing overlap reporting so this does not become
+      // noise on layouts that merely touch.
+      if (!contains(left, right, 0.01) && !contains(right, left, 0.01)) continue;
+      regionNestingErrors += 1;
+      diagnostics.push(
+        error(
+          "TOP419_REGION_OVERLAP",
+          `Groups ${JSON.stringify(left.id)} and ${JSON.stringify(right.id)} are unrelated but one contains the other, which reads as a containment the model does not declare.`,
+        ),
+      );
+    }
+  }
+
   const edgeCrossings = countEdgeCrossings(geometry.edges);
   const coincident = findCoincidentSegments(geometry.edges);
   for (const pair of coincident) {
@@ -232,6 +352,11 @@ export function analyzeGeometry(view: MeasuredView, geometry: GeometryView): Qua
       droppedRelationships: droppedEdges.length,
       droppedComponents: droppedNodes.length,
       droppedLabels: droppedLabels.length,
+      droppedRegions: droppedGroups.length,
+      droppedAnnotations: droppedAnnotations.length,
+      detachedEndpoints,
+      outOfBoundsObjects: outOfBounds,
+      regionNestingErrors,
       illegalBoundaryCrossings,
       labelOverlaps,
       annotationOverlaps,
@@ -423,4 +548,71 @@ function warning(code: string, message: string): Diagnostic {
 
 function round(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+/**
+ * How far a route end may sit from what it attaches to before it reads as detached.
+ *
+ * Routers legitimately stop a few pixels short so an arrowhead butts cleanly against a
+ * border, and a connector stubs out of its port before turning. Measured across the
+ * example and fixture corpus, real endpoints land either exactly on the attachment or
+ * exactly 4px out of a port, so this covers the stub without covering a connector that
+ * genuinely floats free.
+ */
+const ATTACHMENT_TOLERANCE = 6;
+
+/**
+ * Distance from a route end to the nearest thing it may legally attach to: the component
+ * itself, or one of that component's declared ports.
+ *
+ * Ports are anchors placed just outside the component border — a route to a declared
+ * route compartment leaves from the port, not from the card — so measuring only to the
+ * node rectangle would report every ported connector in the corpus as detached.
+ */
+function distanceToAttachment(
+  point: Point,
+  node: { readonly ports: readonly Point[] } & Rect,
+  lifeline = false,
+): number {
+  const surfaces = [distanceToRect(point, node), ...node.ports.map((port) => Math.hypot(point.x - port.x, point.y - port.y))];
+  if (lifeline) {
+    // The lifeline runs straight down from the header's horizontal centre. A message may
+    // meet it anywhere below the header, but not to one side of it.
+    const centre = node.x + node.width / 2;
+    surfaces.push(distanceToRect(point, { x: centre, y: node.y, width: 0, height: Number.MAX_SAFE_INTEGER }));
+  }
+  return Math.min(...surfaces);
+}
+
+/** Shortest distance from a point to a rectangle; zero when the point is inside it. */
+function distanceToRect(point: Point, rect: Rect): number {
+  const dx = Math.max(rect.x - point.x, 0, point.x - (rect.x + rect.width));
+  const dy = Math.max(rect.y - point.y, 0, point.y - (rect.y + rect.height));
+  return Math.hypot(dx, dy);
+}
+
+/** Whether a rectangle lies inside the canvas, allowing for stroke width at the edges. */
+function withinBounds(rect: Rect, canvas: Rect): boolean {
+  const slack = 2;
+  return (
+    rect.x >= canvas.x - slack &&
+    rect.y >= canvas.y - slack &&
+    rect.x + rect.width <= canvas.x + canvas.width + slack &&
+    rect.y + rect.height <= canvas.y + canvas.height + slack
+  );
+}
+
+/** Whether one group is an ancestor or descendant of the other, so overlap is containment. */
+function isRelatedGroup(left: string, right: string, groups: readonly { id: string; parent?: string }[]): boolean {
+  const parentOf = new Map(groups.map((group) => [group.id, group.parent]));
+  const ancestors = (id: string): Set<string> => {
+    const found = new Set<string>();
+    let current = parentOf.get(id);
+    while (current !== undefined && !found.has(current)) {
+      found.add(current);
+      current = parentOf.get(current);
+    }
+    return found;
+  };
+  return ancestors(left).has(right) || ancestors(right).has(left);
 }

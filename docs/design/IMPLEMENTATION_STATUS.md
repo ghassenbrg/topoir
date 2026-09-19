@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-19. This file is the live execution ledger for the design program.
 
-**Program state: in progress. Next task: T03. Current milestone: M0 (T00–T04).**
+**Program state: in progress. Next task: T04. Current milestone: M0 (T00–T04).**
 
 The full review previously verified `bc64cf2`: 91 tests in 15 files passed; 240/240 synthetic cases compiled without hard geometry defects; 220/240 passed the selected defect counters; six reference candidates were deterministic with no approved parity recorded. These are historical baseline observations, not evidence that the tasks below are implemented. The design-writing task added documents/examples only.
 
@@ -13,7 +13,7 @@ Allowed task states: `not_started`, `in_progress`, `implemented_pending_gate`, `
 | T00 | M0 | complete | Baseline at `dfad55c` recorded; 12 review defects reproduced as public fixtures + `it.fails` assertions. See session entry. |
 | T01 | M0 | complete | Six asset roles, measured badges, declared abbreviation. `TOP440_TEXT_ABBREVIATED` added. See session entry. |
 | T02 | M0 | complete | Resolved font contract, token-based theme inheritance, contrast and colour diagnostics. `TOP330`/`TOP331`/`TOP442` added. See session entry. |
-| T03 | M0 | not_started | |
+| T03 | M0 | complete | Attachment/bounds/coverage/nesting checks, explicit raster dimensions, output-name preflight. Found and fixed a real endpoint-detaching routing bug. See session entry. |
 | T04 | M0 | not_started | |
 | T05 | M1 | not_started | |
 | T06 | M1 | not_started | |
@@ -309,3 +309,64 @@ That last row is the main evidence for the theme refactor: replacing three theme
 **Outstanding gates.** M0 gate still open. No human visual review obtained or claimed.
 
 **Next ready task: T03** (geometry/artifact integrity and accurate dimensions). Its dependency T00 is complete, and its five probes are in place and failing as intended.
+
+### T03 — geometry/artifact integrity and accurate dimensions — 2026-09-20
+
+**Task: T03 — geometry/artifact integrity and accurate dimensions. State: complete.**
+
+Baseline commit `bf63dcf` (T02). No unrelated worktree changes.
+
+**Behavior implemented.**
+
+1. **Routes must meet what they connect.** `analyzeGeometry` had no attachment contract at all: the review translated every route point 100,000px away and got no attachment diagnostic. `TOP426_EDGE_ENDPOINT_DETACHED` now checks each route's first and last point against the attachment surfaces that are actually legal — the component itself, any of its declared ports, or, in a sequence, the participant's lifeline. The tolerance was not guessed: measuring the example and fixture corpus gave a clean bimodal distribution of exactly 0px (52 endpoints) and exactly 4px out of a port (20 endpoints), never anything between, because ELK declares ports as 8x8 boxes offset outside the node. Sequence is handled as a different attachment surface rather than an exemption, so a sequence message still has to land on the lifeline it claims.
+
+2. **Declared boundaries and notes cannot vanish.** Coverage existed for components and relationships but not for groups or annotations, so geometry with every group or every annotation missing was reported as clean. `TOP415_REGION_DROPPED` and `TOP416_ANNOTATION_DROPPED` close that.
+
+3. **Nothing may be drawn outside the canvas.** `TOP417_GEOMETRY_OUT_OF_BOUNDS` covers components, boundaries, annotations and route points. A mark outside the declared canvas is cropped at export with no trace in the result, which is indistinguishable from never having drawn it.
+
+4. **Regions nest or sit apart.** `TOP418_REGION_OUTSIDE_PARENT` for a child boundary escaping its parent, `TOP419_REGION_OVERLAP` for unrelated boundaries where one contains the other. Ancestry is excluded, because containment is what nesting looks like.
+
+5. **Logical and raster dimensions are separate, explicit fields.** At scale 2 the result reported 360x226 while the PNG header said 720x452. Artifacts and manifest entries now carry `logicalWidth`/`logicalHeight`, `pixelWidth`/`pixelHeight` and `scale`. Raster dimensions are read back from the encoded PNG's IHDR rather than computed, because deriving them from the scene and the requested scale would reintroduce the exact disagreement the fields exist to prevent. `width`/`height` keep their old logical meaning for existing callers, as the task required. `scale` carries the requested zoom rather than a derived one: the rasterizer rounds to whole pixels, so a 372.67px scene at scale 2 encodes as 745 and a derived value reports 1.999.
+
+6. **Output names are checked before anything is written.** `TOP121_OUTPUT_NAME_COLLISION` is a preflight: two view ids that map to one file name stop compilation before any artifact exists, so neither can overwrite the other. Distinct names are unaffected, which is asserted.
+
+**A real routing bug the new checks found, and fixed.**
+
+`nudgeCoincidentSegments` in `layout-elk/src/composition.ts` documents that "only interior segments move, so neither route leaves its endpoints". It did not honor that: it shifted `points[index - 1]`, and at `index === 1` that is `points[0]` — the endpoint anchored to its component. A guard existed but only covered routes of three points or fewer. Generated case 6 produced a connector starting exactly `step` (11px) clear of its source, reading as an arrow floating in space. The loop now starts at index 2, so only genuinely interior segments move.
+
+This is recorded as a fix, not a tolerance change. Widening the attachment tolerance to 11px would have hidden it.
+
+**Files changed:**
+
+- `packages/core/src/quality.ts` — six new checks, `distanceToAttachment`, `withinBounds`, `isRelatedGroup`, six new metrics
+- `packages/layout-elk/src/composition.ts` — the nudge no longer moves route endpoints
+- `packages/sdk/src/index.ts` — explicit dimension fields, PNG IHDR read-back, output-name preflight
+- `packages/schema/src/diagnostics.ts` — `TOP121`, `TOP415`–`TOP419`, `TOP426`
+- `packages/core/test/integrity.test.ts` (new) — 13 assertions against hand-built hostile geometry
+- `packages/sdk/test/review-regression.test.ts` — five probes promoted, two new artifact assertions, one new routing regression
+- `docs/diagnostics.md` — new codes, the collision preflight, and an artifact-dimensions section
+
+**Probes promoted from `it.fails` to `it`:** detached routes, dropped group, dropped annotation, PNG raster dimensions, colliding output names. Three assertions were strengthened while being promoted: the PNG case now also asserts the logical fields are *not* the raster ones, that the legacy fields keep their old meaning, and that the manifest agrees with the artifact; the collision case now asserts the specific code, error severity, and that **no artifacts were produced at all**; two new cases assert that an SVG does not invent raster dimensions and that non-colliding names still compile.
+
+**Verification:**
+
+| Command | Outcome |
+| --- | --- |
+| `pnpm exec vitest run packages/core/test/integrity.test.ts` | 13 passed |
+| `pnpm exec vitest run packages/sdk/test/review-regression.test.ts` | 18 passed |
+| `pnpm check` | build + typecheck clean; **165 tests in 19 files passed** (149 after T02) |
+| render comparison | **all 11 example and all 9 showcase renders byte-identical** — the endpoint-detaching nudge never fired on a published example |
+| `pnpm benchmark:references` | 6/6 deterministic and clean; parity still 0/6 "NOT MET — human review required" |
+| `pnpm benchmark:generalization` | 240 cases, **20 soft failures / 220 passed** — same 20 cases as baseline; 216/240 aspect; widest 46.0:1; canvases under 6% ink improved 28 → 27 |
+
+**The routing fix was verified to be load-bearing** by reverting it and rerunning the new regression test, which failed with `seed 6: expected 1 to be +0`. The fix was then restored.
+
+**An honest trade to record.** Within the 20 still-failing generalization cases, `coincidentEdgeSegments` counts went *up*: case-0203 13 → 26, case-0211 5 → 9, case-0181 4 → 7, case-0177 3 → 6, case-0206 1 → 3, case-0043 2 → 3, case-0006 1 → 2. `illegalBoundaryCrossings` fell in two of the same cases, notably case-0203 4 → 0. This is the direct consequence of the routing fix: the nudge pass had been lowering coincidence counts by detaching connectors from their components. Those separations were not real, so the counts they produced were not real either. The set of failing cases, the pass/fail total and the hard-defect count are all unchanged. Legitimately separating those corridors needs rerouting with junction and capacity handling, which is **T18**, not a wider tolerance here.
+
+**Design decisions.** No contract changed, so `DECISIONS.md` is untouched. Implementation constants: `ATTACHMENT_TOLERANCE = 6` is derived from the measured corpus distribution above, not chosen; `TOP419_REGION_OVERLAP` reports only full containment of an unrelated region, leaving edge-touching to existing overlap reporting so it does not become noise.
+
+**Remaining defects.** One of the twelve T00 probes remains: group focus, assigned to T04 for honest classification and T12 for implementation. 0/6 reference parity unchanged. `examples/rendered/showcase/custom-assets.png` is still stale from before T01 and still untouched.
+
+**Outstanding gates.** M0 gate still open pending T04. No human visual review obtained or claimed.
+
+**Next ready task: T04** (honest discovery and benchmark reporting), the last M0 task. Its dependency T00 is complete and its `group-focus` probe is in place and failing as intended.

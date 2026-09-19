@@ -17,6 +17,11 @@ Errors block a successful result. Warnings allow an artifact but identify a qual
 
 CLI usage — a bad flag or a missing argument — reports `TOP120_CLI_USAGE` and exits 2, with that command's usage text. It is not a `TOP9xx` internal failure. Every command also accepts `--help`.
 
+`TOP121_OUTPUT_NAME_COLLISION` is a preflight check: when two views map to one output file
+name — for example ids differing only by case, which collide on the macOS and Windows
+defaults — compilation stops before anything is produced, so neither view can overwrite the
+other. Rename a view so the ids differ by more than case and punctuation.
+
 Human output:
 
 ```text
@@ -47,8 +52,14 @@ Do not parse message wording. Match `code`, then use `path` and `range` to edit 
 | `TOP412_RELATIONSHIP_DROPPED` | A declared relationship produced no route and is missing from the diagram; a layout backend lost it |
 | `TOP413_COMPONENT_DROPPED` | A declared component was not placed and is missing from the diagram |
 | `TOP414_EDGE_LABEL_DROPPED` | A relationship was routed but its declared label was not placed, so the connector is drawn unexplained |
+| `TOP415_REGION_DROPPED` | A declared boundary was not placed and is missing from the diagram |
+| `TOP416_ANNOTATION_DROPPED` | A declared annotation was not placed, so the explanation it carries is missing |
+| `TOP417_GEOMETRY_OUT_OF_BOUNDS` | A mark lies outside the declared canvas, so export crops it away with no trace in the result |
+| `TOP418_REGION_OUTSIDE_PARENT` | A nested boundary is not contained by its parent |
+| `TOP419_REGION_OVERLAP` | Two unrelated boundaries interpenetrate, which reads as a containment the model does not declare |
 | `TOP423_ILLEGAL_BOUNDARY_CROSSING` | A connector enters or leaves a boundary more often than its endpoints require; inspect the route or the composition |
 | `TOP424_EDGE_CROSSES_OWN_ENDPOINT` | A connector runs back across its own source or target component, so the arrow appears to leave the wrong side; inspect the route |
+| `TOP426_EDGE_ENDPOINT_DETACHED` | A route does not meet the component it claims to connect. A connector may attach to the component, to one of its declared ports, or — in a sequence — to the participant's lifeline. The message gives the measured gap |
 | `TOP425_EDGE_SEGMENTS_COINCIDENT` | Two connectors are drawn along the same line for a visible stretch, so two relationships read as one; inspect the composition or report a routing defect |
 | `TOP430_LABEL_OVERLAP` | Inspect colliding node, heading, annotation or edge label; revise composition or report a refinement defect |
 | `TOP431_GROUP_TITLE_INTERSECTION` | A connector crosses a boundary heading; inspect the route/refinement |
@@ -75,3 +86,19 @@ measured text run carries `source`, a `disposition` of `rendered` or `abbreviate
 `omittedGraphemes` total it for the view.
 
 An absence of these diagnostics is necessary but not sufficient for the [visual acceptance benchmark](visual-benchmark.md).
+
+## Artifact dimensions
+
+Each artifact reports its logical size and, for a raster format, its actual pixel size:
+
+| Field | Meaning |
+| --- | --- |
+| `logicalWidth` / `logicalHeight` | The drawing's own coordinate space, unaffected by render scale |
+| `pixelWidth` / `pixelHeight` | Raster dimensions read back from the encoded PNG header. Absent for SVG |
+| `scale` | The zoom the raster was produced at. Absent for SVG |
+| `width` / `height` | Synonyms for the logical size, kept for existing callers |
+
+At PNG scale 2 the result used to report the logical size while the PNG header said twice
+that, so a caller sizing a page from the result was wrong by the scale factor with nothing
+to tell it. The raster fields are read from the encoded bytes rather than computed, so they
+describe what the caller actually received.

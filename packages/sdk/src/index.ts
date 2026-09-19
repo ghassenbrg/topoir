@@ -49,8 +49,30 @@ export interface CompileArtifact {
   readonly mediaType: "image/svg+xml" | "image/png";
   readonly content: string | Uint8Array;
   readonly sha256: string;
+  /**
+   * Logical width in user units. Kept for existing callers; it is a synonym for
+   * `logicalWidth` and is unchanged by PNG scale. Prefer the explicit fields below.
+   */
   readonly width: number;
+  /** Logical height in user units. Synonym for `logicalHeight`. */
   readonly height: number;
+  /**
+   * The drawing's own coordinate space, independent of how it was rasterized.
+   *
+   * At PNG scale 2 the artifact metadata used to report 360x226 while the PNG header said
+   * 720x452, so a caller sizing a page from the result was wrong by the scale factor with
+   * nothing to tell it. Logical and raster size are now separate, explicit fields.
+   */
+  readonly logicalWidth: number;
+  readonly logicalHeight: number;
+  /**
+   * Actual raster dimensions, read back from the encoded PNG rather than computed. Absent
+   * for SVG, which has no raster size of its own.
+   */
+  readonly pixelWidth?: number;
+  readonly pixelHeight?: number;
+  /** The zoom the raster was produced at. Absent for SVG. */
+  readonly scale?: number;
 }
 
 export interface CompiledView {
@@ -73,8 +95,15 @@ export interface ArtifactManifest {
     readonly fileName: string;
     readonly mediaType: string;
     readonly sha256: string;
+    /** Logical size, kept for existing consumers. Synonym for `logicalWidth`/`logicalHeight`. */
     readonly width: number;
     readonly height: number;
+    readonly logicalWidth: number;
+    readonly logicalHeight: number;
+    /** Raster size read back from the PNG header. Absent for SVG. */
+    readonly pixelWidth?: number;
+    readonly pixelHeight?: number;
+    readonly scale?: number;
   }[];
 }
 
@@ -147,6 +176,28 @@ export class TopoIRCompiler {
       };
     }
 
+    // Output names are checked before anything is written. Two view ids that differ only
+    // by case produce one file name, so on a case-insensitive filesystem — the macOS and
+    // Windows default — the second view silently overwrites the first.
+    const byFileName = new Map<string, string[]>();
+    for (const viewId of viewIds) {
+      const name = safeFileName(viewId);
+      byFileName.set(name, [...(byFileName.get(name) ?? []), viewId]);
+    }
+    for (const [name, owners] of byFileName) {
+      if (owners.length < 2) continue;
+      diagnostics.push({
+        code: "TOP121_OUTPUT_NAME_COLLISION",
+        severity: "error",
+        message:
+          `Views ${owners.map((owner) => JSON.stringify(owner)).join(" and ")} both write to ${JSON.stringify(name)}, ` +
+          `so one would overwrite the other. Rename a view so the ids differ by more than case and punctuation.`,
+      });
+    }
+    if (hasErrors(diagnostics)) {
+      return { ok: false, diagnostics, document: loaded.document, views: [], artifacts: [] };
+    }
+
     for (const viewId of viewIds) {
       const view = projectView(loaded.document, viewId);
       let theme;
@@ -209,7 +260,7 @@ export class TopoIRCompiler {
       if (format === "png" || format === "both") {
         const svg = renderSvg(scene);
         const png = renderPng(svg, options.png);
-        artifacts.push(createArtifact(view.id, "png", png, scene));
+        artifacts.push(createArtifact(view.id, "png", png, scene, options.png?.scale ?? 1));
       }
     }
 
@@ -256,8 +307,10 @@ function createArtifact(
   format: "svg" | "png",
   content: string | Uint8Array,
   scene: Scene,
+  requestedScale?: number,
 ): CompileArtifact {
   const bytes = typeof content === "string" ? Buffer.from(content, "utf8") : content;
+  const raster = format === "png" ? pngDimensions(bytes) : undefined;
   return {
     viewId,
     format,
@@ -267,7 +320,34 @@ function createArtifact(
     sha256: sha256(bytes),
     width: scene.width,
     height: scene.height,
+    logicalWidth: scene.width,
+    logicalHeight: scene.height,
+    ...(raster === undefined
+      ? {}
+      : {
+          pixelWidth: raster.width,
+          pixelHeight: raster.height,
+          // The zoom that was asked for, not one derived from the encoded size: the
+          // rasterizer rounds to whole pixels, so 372.67 at scale 2 encodes as 745 and a
+          // derived value would report 1.999.
+          scale: requestedScale ?? 1,
+        }),
   };
+}
+
+/**
+ * Raster dimensions read back from the encoded PNG's IHDR chunk.
+ *
+ * Read rather than computed on purpose: the point of the field is to describe the bytes
+ * the caller actually received, so deriving it from the scene and the requested scale
+ * would reintroduce exactly the disagreement it exists to prevent.
+ */
+function pngDimensions(bytes: Uint8Array): { width: number; height: number } | undefined {
+  const buffer = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  if (buffer.length < 24 || !buffer.subarray(0, 8).equals(signature)) return undefined;
+  if (buffer.subarray(12, 16).toString("ascii") !== "IHDR") return undefined;
+  return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
 }
 
 function hasErrors(diagnostics: readonly Diagnostic[]): boolean {
