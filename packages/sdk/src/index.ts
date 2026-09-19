@@ -5,6 +5,7 @@ import {
   analyzeGeometry,
   analyzeVisibility,
   bundledFontTextMeasurer,
+  planForNode,
   fontSetDiagnostic,
   glyphDiagnostic,
   intentDiagnostics,
@@ -15,6 +16,7 @@ import {
   resolveTheme,
   type GeometryView,
   type LayoutEngine,
+  type ComponentPlan,
   type MeasuredView,
   type NormalizedDocument,
   type TextMeasurer,
@@ -84,6 +86,16 @@ export interface CompiledView {
   readonly geometry: GeometryView;
   readonly scene: Scene;
   readonly metrics: Readonly<Record<string, number>>;
+  /**
+   * One `ComponentPlan` per placed component (T08).
+   *
+   * The plan is the shared description the drawing and the geometry analysis are meant to
+   * work from: it carries the true silhouette, the real attachment sites and the content
+   * disposition. It is produced from the measured, laid-out component, so a caller can
+   * ask where a connector may legally meet a component, or what happened to a piece of
+   * authored content, without re-deriving either from the picture.
+   */
+  readonly plans: readonly ComponentPlan[];
 }
 
 export interface ArtifactManifest {
@@ -256,11 +268,28 @@ export class TopoIRCompiler {
       const content = analyzeContent(measured);
       diagnostics.push(...content.diagnostics);
       const scene = buildScene(measured, layout.geometry, theme, assets);
+      // Plans are compiled from the placed components, so their silhouettes and
+      // attachment sites describe the drawing that was actually produced.
+      const incident = new Map<string, number>();
+      for (const edge of measured.edges) {
+        incident.set(edge.from, (incident.get(edge.from) ?? 0) + 1);
+        incident.set(edge.to, (incident.get(edge.to) ?? 0) + 1);
+      }
+      const geometryById = new Map(layout.geometry.nodes.map((node) => [node.id, node]));
+      const plans = measured.nodes.flatMap((node) => {
+        const placed = geometryById.get(node.id);
+        if (placed === undefined) return [];
+        // Only the rectangle: a plan's bounds are geometry, not a copy of the whole
+        // geometry node, or the plan quietly carries a second copy of its ports.
+        const bounds = { x: placed.x, y: placed.y, width: placed.width, height: placed.height };
+        return [planForNode(node, { theme, bounds }, incident.get(node.id) ?? 2)];
+      });
       const compiled: CompiledView = {
         view,
         measured,
         geometry: layout.geometry,
         scene,
+        plans,
         metrics: { ...layout.metrics, ...quality.metrics, ...content.metrics, ...visibility.metrics },
       };
       compiledViews.push(compiled);

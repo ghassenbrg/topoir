@@ -6,6 +6,7 @@ import type {
   GroupDefinition,
   GroupLayout,
   NodeDefinition,
+  NodeVisual,
   PortDefinition,
   SourceMap,
   TopoIRDocument,
@@ -157,6 +158,17 @@ export interface MeasuredNode extends NormalizedNode, Size {
    * resolved asset identity. `size` is absent when the role did not resolve.
    */
   readonly assetRoles?: readonly MeasuredAssetRole[];
+  /**
+   * The silhouette measurement resolved for this component, recorded so nothing
+   * downstream re-derives it.
+   *
+   * Geometry analysis and drawing used to each decide what shape a component is: the
+   * renderer called `nodeShape`, and the analyzer assumed a rectangle. A route meeting a
+   * diamond's corner or a cylinder's curved cap is correctly attached but sits outside the
+   * bounding box, and one meeting the bounding box is inside it but visibly detached from
+   * the drawn outline. Carrying the resolved shape here means both see the same component.
+   */
+  readonly shape?: NodeVisual["shape"];
 }
 
 export interface MeasuredAssetRole {

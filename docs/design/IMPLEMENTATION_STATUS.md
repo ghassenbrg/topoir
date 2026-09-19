@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-19. This file is the live execution ledger for the design program.
 
-**Program state: in progress. M0 complete. Next task: T08. Current milestone: M1 (T05–T09).**
+**Program state: in progress. M0 complete. Next task: T08 slice 2 (renderer draws from plans). Current milestone: M1 (T05–T09).**
 
 The full review previously verified `bc64cf2`: 91 tests in 15 files passed; 240/240 synthetic cases compiled without hard geometry defects; 220/240 passed the selected defect counters; six reference candidates were deterministic with no approved parity recorded. These are historical baseline observations, not evidence that the tasks below are implemented. The design-writing task added documents/examples only.
 
@@ -18,7 +18,7 @@ Allowed task states: `not_started`, `in_progress`, `implemented_pending_gate`, `
 | T05 | M1 | complete | ComponentPlan/blocks/attachments/disposition, SceneDocument and Medium in core; renderer re-exports; three-family fixtures and dependency-direction test. Interfaces only. See session entry. |
 | T06 | M1 | complete | Font registry with face hashes, fallback chains and content-keyed caching; one resolved set reaches measurement, SVG and PNG; `TOP332_GLYPH_NOT_AVAILABLE`. See session entry. |
 | T07 | M1 | complete | Block measurement engine, bounded width negotiation, true silhouettes and ink bounds, attachment derivation, content accounting. Not yet wired into the pipeline — that is T08. See session entry. |
-| T08 | M1 | not_started | |
+| T08 | M1 | in_progress | Slice 1 done: shared silhouettes, plans compiled per view, agreement asserted. Slice 2 (renderer draws from plan blocks; chrome via the block engine; SceneDocument ownership) not started. See session entry. |
 | T09 | M1 | not_started | |
 | T10 | M2 | not_started | |
 | T11 | M2 | not_started | |
@@ -656,3 +656,79 @@ against its own contract before every existing golden depends on it.
 **Next ready task: T08** (migrate renderer and templates to ComponentPlan). Its dependency
 T07 is complete. T08 is where existing goldens can change, and the roadmap requires every
 changed golden to be inspected and explained rather than re-baselined.
+
+### T08 slice 1 — shared silhouettes and compiled plans — 2026-09-20
+
+**Task: T08 — migrate renderer/templates to ComponentPlan. State: in_progress.**
+
+Baseline commit `1202cfe` (T07). No unrelated worktree changes.
+
+**This is one slice of T08, not the whole task.** The roadmap allows a task to span several
+changes; the ledger records what is actually done. Read the "remaining" section below before
+relying on any of this.
+
+**What this slice implements.**
+
+1. **The resolved silhouette is recorded once, on the measured component.** Geometry analysis and drawing each decided independently what shape a component is: the renderer called `nodeShape`, and the analyzer assumed a rectangle. That disagreement is not cosmetic — a route meeting a diamond's corner or a cylinder's curved cap is correctly attached but lies outside the bounding box, and one meeting the bounding box is inside it but visibly detached from the drawn outline. `MeasuredNode.shape` now carries what measurement resolved, and `distanceToOutline` in the analyzer uses it, so both consumers see the same component.
+
+2. **A `ComponentPlan` is compiled per placed component** (`core/src/components/compile-plan.ts`, surfaced as `CompiledView.plans`). Each plan carries the true silhouette, the real attachment sites and the content-disposition table, built from the measured, laid-out component — so a caller can ask where a connector may legally meet a component, or what became of a piece of authored content, without re-deriving either from the picture.
+
+3. **Attachment sites are derived, not assumed.** A component with visible route compartments gets one `port` site per compartment, positioned at that compartment's vertical centre. Everything else gets `side` sites spaced by the number of relationships that actually meet it. A test asserts no two sites on a component ever share a point, which is what keeps several relationships reading as several lines.
+
+**Deliberately not done in this slice.** `planForNode` returns an empty `blocks` array. The
+legacy renderer still owns block placement, and inventing block positions here that nothing
+draws from would create a *second* description of the component — precisely the duplication
+the plan exists to remove. Populating `blocks` and having the renderer place them is slice 2.
+
+**Files changed:**
+
+- `packages/core/src/components/compile-plan.ts` (new) — `planForNode`, `silhouetteFor`, `attachmentsFor`, `dispositionsFor`
+- `packages/core/src/ir.ts` — `MeasuredNode.shape`
+- `packages/core/src/measure.ts` — record the resolved shape
+- `packages/core/src/quality.ts` — `distanceToOutline`, shape-aware attachment checking
+- `packages/sdk/src/index.ts` — compile plans, expose `CompiledView.plans`
+- `packages/sdk/test/component-plan.test.ts` (new) — 12 assertions
+
+**The assertion that matters most.** `every routed endpoint lands on a site its component's
+plan declares` walks every route in three examples and checks each end against the sites
+that component's own plan declares. If the analyzer accepted a connector the plan had no
+site for, the two would be describing different components and the plan would be worse than
+useless. This is the acceptance criterion "geometry and drawing share attachments/
+silhouettes", tested rather than asserted in prose.
+
+A second test cross-checks the per-component plans against the view-level content metrics:
+two independent paths to the same fact about abbreviation, which must agree.
+
+**Verification:**
+
+| Command | Outcome |
+| --- | --- |
+| `pnpm exec vitest run packages/sdk/test/component-plan.test.ts` | 12 passed |
+| `pnpm check` | build + typecheck clean; **291 tests in 26 files passed** (279 after T07) |
+| render comparison | **all 20 example and showcase renders byte-identical** |
+| `pnpm benchmark:generalization` | 240 cases; unchanged: hard 0/240, all-clean 220/240, shape 216/240 |
+
+No golden changed, because this slice adds a shared description and a stricter shared check
+without altering what is drawn.
+
+**Remaining for T08, none of it started:**
+
+- Populate `ComponentPlan.blocks` from the block engine and have the renderer *place what
+  the plan measured* rather than computing positions in `nodeComponent`.
+- Move title, subtitle and legend onto the block engine. `build-scene.ts` still calls
+  `layoutText` directly for all three, which is the "independent wrapping" the acceptance
+  criterion forbids. It legitimately happens after layout, because the title's wrap width
+  depends on the final canvas width — so this is about using the same measurement system,
+  not about moving the work earlier.
+- Emit a `SceneDocument` with per-primitive semantic ownership, so every visible mark has a
+  traceable owner. The legacy `Scene` remains what `buildScene` returns.
+- Groups, annotations and edge labels still have no plans.
+
+Slice 2 is where existing goldens can genuinely change, and the roadmap requires every
+changed golden to be inspected and explained rather than re-baselined.
+
+**Remaining defects.** Unchanged. Reference parity remains **0/6 unreviewed**.
+
+**Outstanding gates.** M1 gate open; it needs T08 complete and T09.
+
+**Next ready task: T08 slice 2.**

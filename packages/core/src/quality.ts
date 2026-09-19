@@ -155,7 +155,7 @@ export function analyzeGeometry(view: MeasuredView, geometry: GeometryView): Qua
       ] as const) {
         const node = nodeById.get(nodeId);
         if (node === undefined || end === undefined) continue;
-        const gap = distanceToAttachment(end, node, lifelines);
+        const gap = distanceToAttachment(end, node, lifelines, view.nodes.find((candidate) => candidate.id === nodeId)?.shape);
         if (gap > ATTACHMENT_TOLERANCE) {
           detachedEndpoints += 1;
           diagnostics.push(
@@ -562,19 +562,25 @@ function round(value: number): number {
 const ATTACHMENT_TOLERANCE = 6;
 
 /**
- * Distance from a route end to the nearest thing it may legally attach to: the component
- * itself, or one of that component's declared ports.
+ * Distance from a route end to the nearest thing it may legally attach to: the component's
+ * drawn outline, one of its declared ports, or — in a sequence — its lifeline.
  *
- * Ports are anchors placed just outside the component border — a route to a declared
- * route compartment leaves from the port, not from the card — so measuring only to the
+ * Ports are anchors placed just outside the component border, so measuring only to the
  * node rectangle would report every ported connector in the corpus as detached.
+ *
+ * `shape` is the silhouette measurement resolved, carried on the measured node so the
+ * analyzer and the renderer cannot disagree about what a component looks like. A diamond
+ * and a cylinder are drawn inside their layout rectangle, so a connector that correctly
+ * meets the drawn outline is *not* on the rectangle, and one that meets the rectangle is
+ * visibly detached from the drawing.
  */
 function distanceToAttachment(
   point: Point,
   node: { readonly ports: readonly Point[] } & Rect,
   lifeline = false,
+  shape?: string,
 ): number {
-  const surfaces = [distanceToRect(point, node), ...node.ports.map((port) => Math.hypot(point.x - port.x, point.y - port.y))];
+  const surfaces = [distanceToOutline(point, node, shape), ...node.ports.map((port) => Math.hypot(point.x - port.x, point.y - port.y))];
   if (lifeline) {
     // The lifeline runs straight down from the header's horizontal centre. A message may
     // meet it anywhere below the header, but not to one side of it.
@@ -582,6 +588,30 @@ function distanceToAttachment(
     surfaces.push(distanceToRect(point, { x: centre, y: node.y, width: 0, height: Number.MAX_SAFE_INTEGER }));
   }
   return Math.min(...surfaces);
+}
+
+/**
+ * Distance from a point to a component's drawn outline.
+ *
+ * A point inside the layout rectangle is at distance zero for every shape: a connector
+ * ending inside a component is a different defect (`TOP424`), not a detachment. What this
+ * adds is tolerance for a point on the *drawn* edge of a non-rectangular component, which
+ * sits inside the rectangle for a diamond and outside it for a cylinder's cap.
+ */
+function distanceToOutline(point: Point, rect: Rect, shape?: string): number {
+  const toRect = distanceToRect(point, rect);
+  if (toRect === 0) return 0;
+  if (shape === "cylinder") {
+    // Caps bulge above and below the body by roughly half the cap height.
+    const grown = { x: rect.x, y: rect.y - 6, width: rect.width, height: rect.height + 12 };
+    return Math.min(toRect, distanceToRect(point, grown));
+  }
+  if (shape === "stack") {
+    // Sheets are drawn behind and offset, so the painted outline extends past the box.
+    const grown = { x: rect.x, y: rect.y, width: rect.width + 7, height: rect.height + 7 };
+    return Math.min(toRect, distanceToRect(point, grown));
+  }
+  return toRect;
 }
 
 /** Shortest distance from a point to a rectangle; zero when the point is inside it. */

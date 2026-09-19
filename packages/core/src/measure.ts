@@ -148,6 +148,7 @@ export function measureView(
       ...(imageSize ? { imageSize } : {}),
       ...(assetSizes.length ? { assetSizes } : {}),
       ...(assetRoles.length ? { assetRoles } : {}),
+      shape,
       ...(badgeText === undefined ? {} : { badgeText }),
       ...(descriptionText === undefined ? {} : { descriptionText }),
       ports: node.ports.map((port, index) => ({
