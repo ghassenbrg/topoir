@@ -44,6 +44,17 @@ Do not parse message wording. Match `code`, then use `path` and `range` to edit 
 | `TOP104_UNKNOWN_FAMILY` | The model names a diagram family that does not exist. The message lists the families this build accepts |
 | `TOP105_FAMILY_NOT_IMPLEMENTED` | The family is reserved but has no body schema in this build, so the document is rejected rather than compiling to nothing. The message names the task that will implement it |
 | `TOP251_DESIGN_REFERENCE_NOT_FOUND` | Correct the focus node or story edge ID |
+| `TOP253_SOURCE_NOT_FOUND` | Provenance cites a source the workspace does not declare |
+| `TOP254_ENTITY_NOT_FOUND` | An element claims an identity that does not exist |
+| `TOP255_MODEL_NOT_FOUND` | A view projects a model that does not exist |
+| `TOP256_STYLE_CYCLE` | Style inheritance is circular, so resolution would not terminate |
+| `TOP257_STYLE_NOT_FOUND` | A style extends one that does not exist |
+| `TOP258_COLLAPSE_TARGET_INVALID` | Collapse names something that is not a container. Only a boundary can be summarised |
+| `TOP259_OCCURRENCE_ELEMENT_NOT_FOUND` | An occurrence references an element the model lacks, or that this view does not include |
+| `TOP261_CONNECTION_BINDING_INVALID` | A connection binds a relationship end to an occurrence this view does not contain |
+| `TOP262_CONNECTION_AMBIGUOUS` | An element appears more than once, so a relationship touching it has several candidate ends. Add a `projection.connections` binding; the compiler will not guess |
+| `TOP270_MIGRATION_DEFAULT_APPLIED` | Migration supplied something v1alpha2 requires and v1alpha1 did not, and says what |
+| `TOP271_MIGRATION_NOT_REPRESENTABLE` | A v1alpha1 field has no v1alpha2 equivalent and was not migrated. Reported rather than dropped, and never guessed at |
 | `TOP252_INTENT_NOT_APPLIED` | The view declares intent this build accepts but does not execute, so the drawing does not reflect it. The message names the view and the specific intent. Run `topoir capabilities` to see what each intent's maturity actually is |
 | `TOP320_ASSET_DIRECTORY_INVALID` | Configure an existing readable asset directory |
 | `TOP320_ASSET_METADATA_INVALID` | Repair the `assets.yaml` mapping, file or alias metadata |

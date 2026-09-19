@@ -18,3 +18,4 @@ export * from "./quality/scene.js";
 export * from "./semantic.js";
 export * from "./theme.js";
 export * from "./view.js";
+export * from "./workspace/index.js";

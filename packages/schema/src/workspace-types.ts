@@ -261,12 +261,12 @@ export interface ArchitectureBody {
 
 /** A model's body is selected by its family. Only families this build implements are accepted. */
 export type Model = {
-  readonly "id"?: unknown;
-  readonly "familyVersion"?: unknown;
-  readonly "title"?: unknown;
-  readonly "description"?: unknown;
-  readonly "family"?: "architecture";
-  readonly "body"?: ArchitectureBody;
+  readonly "id": Id;
+  readonly "familyVersion"?: string;
+  readonly "title"?: string;
+  readonly "description"?: string;
+  readonly "family": "architecture";
+  readonly "body": ArchitectureBody;
 };
 
 export interface Projection {
@@ -313,33 +313,33 @@ export interface Medium {
 
 /** A required constraint that cannot be satisfied is an error, not a preference that was outvoted. */
 export type Constraint = {
-  readonly "id"?: unknown;
-  readonly "strength"?: unknown;
-  readonly "priority"?: unknown;
-  readonly "type"?: "order";
+  readonly "id": Id;
+  readonly "strength"?: "required" | "preferred";
+  readonly "priority"?: number;
+  readonly "type": "order";
   readonly "items": readonly Id[];
   readonly "axis"?: "x" | "y";
 } | {
-  readonly "id"?: unknown;
-  readonly "strength"?: unknown;
-  readonly "priority"?: unknown;
-  readonly "type"?: "place-relative";
+  readonly "id": Id;
+  readonly "strength"?: "required" | "preferred";
+  readonly "priority"?: number;
+  readonly "type": "place-relative";
   readonly "subject": Id;
   readonly "reference": Id;
   readonly "side": "above" | "below" | "left" | "right";
   readonly "gap"?: number;
 } | {
-  readonly "id"?: unknown;
-  readonly "strength"?: unknown;
-  readonly "priority"?: unknown;
-  readonly "type"?: "align";
+  readonly "id": Id;
+  readonly "strength"?: "required" | "preferred";
+  readonly "priority"?: number;
+  readonly "type": "align";
   readonly "items": readonly Id[];
   readonly "axis": "x" | "y";
 } | {
-  readonly "id"?: unknown;
-  readonly "strength"?: unknown;
-  readonly "priority"?: unknown;
-  readonly "type"?: "group";
+  readonly "id": Id;
+  readonly "strength"?: "required" | "preferred";
+  readonly "priority"?: number;
+  readonly "type": "group";
   readonly "items": readonly Id[];
 };
 

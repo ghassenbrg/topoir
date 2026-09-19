@@ -125,8 +125,8 @@ const LANGUAGES: readonly Capability[] = [
     kind: "language",
     maturity: "experimental",
     summary:
-      "The DiagramWorkspace envelope: reusable entities, several family models, and views that project a model for a purpose. Structural validation only so far — it does not yet compile.",
-    plannedIn: "T11",
+      "The DiagramWorkspace envelope: reusable entities, several family models, and views that project a model for a purpose. Compiles architecture models, with exact and induced relationship selection, explicit occurrences and collapse. Not yet covered by its own acceptance corpus, and no revision or export operation accepts it.",
+    plannedIn: "T25",
   },
 ];
 

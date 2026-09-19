@@ -5,6 +5,8 @@ import {
   analyzeGeometry,
   analyzeScene,
   analyzeVisibility,
+  loadWorkspace,
+  projectWorkspaceView,
   bundledFontTextMeasurer,
   planForNode,
   fontSetDiagnostic,
@@ -151,9 +153,17 @@ export class TopoIRCompiler {
 
   public async compile(sourceText: string, options: CompileOptions = {}): Promise<CompileResult> {
     const source = options.source ?? "<input>";
-    const loaded = loadDocument(sourceText, { source });
-    if (loaded.document === undefined) {
-      return { ok: false, diagnostics: loaded.diagnostics, views: [], artifacts: [] };
+    // A document says which language it is written in. Both loaders produce the same
+    // compilable shape, so nothing below this line knows which one ran.
+    const loaded = loadCompilable(sourceText, source, options.view);
+    if (loaded.viewIds.length === 0 || hasErrors(loaded.diagnostics)) {
+      return {
+        ok: false,
+        diagnostics: loaded.diagnostics,
+        ...(loaded.document === undefined ? {} : { document: loaded.document }),
+        views: [],
+        artifacts: [],
+      };
     }
 
     const layoutEngine = options.layoutEngine ?? new CompositionEngine();
@@ -173,25 +183,7 @@ export class TopoIRCompiler {
     const artifacts: CompileArtifact[] = [];
     const format = options.format ?? "svg";
 
-    let viewIds: readonly string[];
-    try {
-      viewIds = selectViewIds(loaded.document, options.view);
-    } catch (error) {
-      return {
-        ok: false,
-        diagnostics: [
-          ...diagnostics,
-          {
-            code: "TOP260_VIEW_NOT_FOUND",
-            severity: "error",
-            message: error instanceof Error ? error.message : "Unknown view.",
-          },
-        ],
-        document: loaded.document,
-        views: [],
-        artifacts: [],
-      };
-    }
+    const viewIds = loaded.viewIds;
 
     // Output names are checked before anything is written. Two view ids that differ only
     // by case produce one file name, so on a case-insensitive filesystem — the macOS and
@@ -212,11 +204,11 @@ export class TopoIRCompiler {
       });
     }
     if (hasErrors(diagnostics)) {
-      return { ok: false, diagnostics, document: loaded.document, views: [], artifacts: [] };
+      return { ok: false, diagnostics, ...(loaded.document === undefined ? {} : { document: loaded.document }), views: [], artifacts: [] };
     }
 
     for (const viewId of viewIds) {
-      const view = projectView(loaded.document, viewId);
+      const view = loaded.project(viewId);
       let theme;
       try {
         theme = resolveTheme(view.theme);
@@ -330,14 +322,14 @@ export class TopoIRCompiler {
       manifestVersion: 1,
       compiler: { name: "topoir", version: TOPOIR_VERSION },
       input: { source, sha256: sha256(sourceText) },
-      document: { name: loaded.document.metadata.name, apiVersion: loaded.document.apiVersion },
+      document: { name: loaded.name, apiVersion: loaded.apiVersion },
       layout: { engine: layoutEngine.id },
       artifacts: artifacts.map(({ content: _content, ...artifact }) => artifact),
     };
     return {
       ok: !hasErrors(diagnostics) && compiledViews.length === viewIds.length,
       diagnostics,
-      document: loaded.document,
+      ...(loaded.document === undefined ? {} : { document: loaded.document }),
       views: compiledViews,
       artifacts,
       manifest,
@@ -427,6 +419,81 @@ function authoredText(view: ViewGraph): readonly (readonly [string, string])[] {
   }
   for (const annotation of view.annotations) entries.push([`annotation ${annotation.id}`, annotation.text]);
   return entries;
+}
+
+/** A cheap check before parsing, so the right loader reports the right diagnostics. */
+function isWorkspaceSource(text: string): boolean {
+  return /^\s*(?:#[^\n]*\n\s*)*apiVersion:\s*["']?topoir\.dev\/v1alpha2/mu.test(text) || /"apiVersion"\s*:\s*"topoir\.dev\/v1alpha2"/u.test(text);
+}
+
+/**
+ * What the compile loop needs, whichever language the source is written in.
+ *
+ * Both loaders produce this. Nothing downstream of it knows or cares which language the
+ * document was written in, which is what keeps v1alpha1 support from decaying as v1alpha2
+ * grows.
+ */
+interface CompilableSource {
+  readonly apiVersion: string;
+  readonly name: string;
+  readonly viewIds: readonly string[];
+  readonly project: (viewId: string) => ViewGraph;
+  readonly document?: NormalizedDocument;
+  readonly diagnostics: readonly Diagnostic[];
+}
+
+function loadCompilable(sourceText: string, source: string, selection: CompileOptions["view"]): CompilableSource {
+  if (isWorkspaceSource(sourceText)) {
+    const loaded = loadWorkspace(sourceText, { source });
+    const workspace = loaded.workspace;
+    if (workspace === undefined) {
+      return { apiVersion: "topoir.dev/v1alpha2", name: "", viewIds: [], project: () => { throw new Error("no workspace"); }, diagnostics: loaded.diagnostics };
+    }
+    const diagnostics: Diagnostic[] = [...loaded.diagnostics];
+    const projected = new Map<string, ViewGraph>();
+    const declared = workspace.views.map((view) => view.id);
+    const wanted = selection === undefined ? [declared[0]].filter((id): id is string => id !== undefined) : selection === "all" ? declared : [...(typeof selection === "string" ? [selection] : selection)];
+    for (const id of wanted) {
+      if (!declared.includes(id)) {
+        diagnostics.push({ code: "TOP260_VIEW_NOT_FOUND", severity: "error", message: `Unknown view ${JSON.stringify(id)}. Available views: ${declared.join(", ")}.` });
+        continue;
+      }
+      const result = projectWorkspaceView(workspace, id);
+      diagnostics.push(...result.diagnostics);
+      if (result.view !== undefined) projected.set(id, result.view);
+    }
+    return {
+      apiVersion: workspace.apiVersion,
+      name: workspace.metadata.name,
+      viewIds: [...projected.keys()],
+      project: (id) => {
+        const view = projected.get(id);
+        if (view === undefined) throw new Error(`View ${JSON.stringify(id)} was not projected.`);
+        return view;
+      },
+      diagnostics,
+    };
+  }
+  const loaded = loadDocument(sourceText, { source });
+  if (loaded.document === undefined) {
+    return { apiVersion: "topoir.dev/v1alpha1", name: "", viewIds: [], project: () => { throw new Error("no document"); }, diagnostics: loaded.diagnostics };
+  }
+  const document = loaded.document;
+  let viewIds: readonly string[] = [];
+  const diagnostics: Diagnostic[] = [...loaded.diagnostics];
+  try {
+    viewIds = selectViewIds(document, selection);
+  } catch (error) {
+    diagnostics.push({ code: "TOP260_VIEW_NOT_FOUND", severity: "error", message: error instanceof Error ? error.message : "Unknown view." });
+  }
+  return {
+    apiVersion: document.apiVersion,
+    name: document.metadata.name,
+    viewIds,
+    project: (id) => projectView(document, id),
+    document,
+    diagnostics,
+  };
 }
 
 function hasErrors(diagnostics: readonly Diagnostic[]): boolean {

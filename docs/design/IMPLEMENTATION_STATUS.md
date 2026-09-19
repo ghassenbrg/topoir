@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-19. This file is the live execution ledger for the design program.
 
-**Program state: in progress. M0 and M1 complete. Next task: T11. Current milestone: M2 (T10–T15).**
+**Program state: in progress. M0 and M1 complete. Next task: T12. Current milestone: M2 (T10–T15).**
 
 The full review previously verified `bc64cf2`: 91 tests in 15 files passed; 240/240 synthetic cases compiled without hard geometry defects; 220/240 passed the selected defect counters; six reference candidates were deterministic with no approved parity recorded. These are historical baseline observations, not evidence that the tasks below are implemented. The design-writing task added documents/examples only.
 
@@ -21,7 +21,7 @@ Allowed task states: `not_started`, `in_progress`, `implemented_pending_gate`, `
 | T08 | M1 | complete | All acceptance criteria met. Carried work closed: `contentLayout` is the single placement computation, plans carry populated blocks, and the renderer derives nothing itself. |
 | T09 | M1 | complete | Scene QA on final ink: representation, attribution, clipping, real-backdrop contrast, disposition. Found 10 genuinely defective generated cases nothing had reported. See session entry. |
 | T10 | M2 | complete | v1alpha2 envelope, family registry, generated types with a drift test. Structural validation only — it does not compile yet, and discovery says so. See session entry. |
-| T11 | M2 | not_started | |
+| T11 | M2 | complete | Workspace normalization, entity identity, exact/induced selection, occurrences with required bindings, collapse coverage, v1alpha1 migration with inventory equality. v1alpha2 now compiles. See session entry. |
 | T12 | M2 | not_started | |
 | T13 | M2 | not_started | |
 | T14 | M2 | not_started | |
@@ -1036,3 +1036,66 @@ different. This is a corrected invariant, not a relaxed one: the original rule w
 
 **Next ready task: T11** (identities, projection, collapse and migration), which turns the
 validated envelope into something the compiler can build from.
+
+### T11 — identities, projection, collapse and migration — 2026-09-20
+
+**Task: T11 — identities, projection, collapse and migration. State: complete.**
+
+Baseline commit `9d54255` (T10). No unrelated worktree changes.
+
+**v1alpha2 now compiles.** T10 added structural validation; this adds normalization,
+projection and an adapter, so a workspace produces a rendered diagram end to end. Verified
+by rendering `fixtures/workspace/architecture.topoir.yaml` through the CLI and inspecting
+the result: the drawing is correct, and `Checkout API` — a node with **no local label** —
+picked up its name from the entity it references, which is entity-label precedence working.
+
+**Behavior implemented.**
+
+1. **Three kinds of identity, separated** (`core/src/workspace/normalize.ts`). An *entity* is a real-world thing, a *model element* is that thing's role in one family, an *occurrence* is one appearance in one view. Label precedence is local label, then the referenced entity's label, then the element id — so an element can borrow its identity's name without restating it, and an element with no label is still identifiable rather than blank. A test asserts a view-local label overrides the display **without changing the entity**.
+
+2. **Reference integrity the schema cannot express**: duplicate ids per namespace, entity and model and view-set references, provenance citing a declared source, and acyclic style inheritance. `TOP253`–`TOP257`.
+
+3. **`edgePolicy: exact`** (`core/src/workspace/project.ts`). The review's finding was that including one relationship between two components silently included every other relationship between them, with no way to opt out. `exact` keeps only what was selected and **never** adds one; `induced` remains the default, so existing behaviour is unchanged and switching is the author's decision. The unselected sibling is recorded as `omitted` with the policy named as the reason.
+
+4. **Occurrences, and bindings that are actually required.** An element appearing twice makes every relationship touching it ambiguous. The projector reports `TOP262_CONNECTION_AMBIGUOUS` and **produces no view**, rather than picking an end. A guess here is a coin flip that silently draws the wrong diagram.
+
+5. **Collapse with complete coverage.** A collapsed boundary's contents become `representedBy` entries pointing at the summary, not omissions. A relationship with both ends inside one summary is represented by it; one crossing the boundary is rewritten to meet the summary. A test asserts **every** model element appears in the coverage report.
+
+6. **Migration** (`core/src/workspace/migrate.ts`). Translates, and nothing more. It invents no entities and no provenance — a test asserts `entities` is absent after migrating a document that declared none. `layout.aspectRatio` is **not** turned into a medium, because a medium needs real dimensions and inventing them would put a size in the document the author never wrote; it is reported as `TOP271` instead. Selection migrates to `induced`, because that is what v1alpha1 does and migrating to `exact` would change which relationships appear.
+
+7. **One compilable shape behind both languages** (`sdk/src/index.ts`). `loadCompilable` returns view ids and a projector; nothing below that line knows which language ran. This replaced an earlier draft that faked a `NormalizedDocument` — which would have broken as soon as anything downstream read a field the fake did not have.
+
+**Files added:** `core/src/workspace/{normalize,project,migrate,index}.ts`,
+`core/test/workspace.test.ts` (30 assertions). **Changed:** `core/src/index.ts`,
+`sdk/src/index.ts`, `schema/src/diagnostics.ts` (11 codes), the v1alpha2 schema (real
+property schemas in union branches, replacing `true` placeholders that generated as
+`unknown`), regenerated `workspace-types.ts`, `core/src/capabilities.ts`, `docs/diagnostics.md`.
+
+**Verification:**
+
+| Command | Outcome |
+| --- | --- |
+| `pnpm exec vitest run packages/core/test/workspace.test.ts` | 30 passed |
+| `pnpm check` | build + typecheck clean; **381 tests in 30 files passed** (351 after T10) |
+| render comparison | all 20 byte-identical |
+| CLI render of a v1alpha2 workspace | correct drawing, inspected |
+
+**The strongest migration assertion.** Every published v1alpha1 document — 20+ examples,
+showcases and fixtures — is migrated and its **element inventory compared for equality**
+against the source. That cannot pass by spot-checking fields; it fails if migration drops,
+renames or invents a single element. A second test round-trips a migrated workspace back
+through the v1alpha2 loader and asserts zero errors.
+
+**Discovery updated honestly.** `topoir.dev/v1alpha2` stays `experimental`, now with
+`plannedIn: T25`, and its summary says what it does and does not do: it compiles
+architecture models, and it has no acceptance corpus of its own and no revision or export
+operation that accepts it. Calling it implemented would overstate it.
+
+**Carried work.** The CLI has no `migrate` command; the roadmap explicitly defers that
+("SDK migration operation, CLI later"), and `migrateToWorkspace` is exported from the SDK.
+
+**Remaining defects.** Unchanged. Reference parity remains **0/6 unreviewed**.
+
+**Next ready task: T12** (presentation plan, medium and constraints). Its dependencies T10,
+T11 and T07 are complete, and it is what makes the `presentation` block executable rather
+than merely validated.

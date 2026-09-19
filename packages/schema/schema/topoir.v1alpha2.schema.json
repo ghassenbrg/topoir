@@ -1186,17 +1186,30 @@
         {
           "additionalProperties": false,
           "properties": {
-            "id": true,
-            "familyVersion": true,
-            "title": true,
-            "description": true,
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "familyVersion": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
             "family": {
               "const": "architecture"
             },
             "body": {
               "$ref": "#/$defs/architectureBody"
             }
-          }
+          },
+          "required": [
+            "id",
+            "family",
+            "body"
+          ]
         }
       ],
       "description": "A model's body is selected by its family. Only families this build implements are accepted."
@@ -1390,10 +1403,26 @@
       "oneOf": [
         {
           "additionalProperties": false,
+          "required": [
+            "id",
+            "type",
+            "items"
+          ],
           "properties": {
-            "id": true,
-            "strength": true,
-            "priority": true,
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "strength": {
+              "enum": [
+                "required",
+                "preferred"
+              ]
+            },
+            "priority": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10
+            },
             "type": {
               "const": "order"
             },
@@ -1410,17 +1439,32 @@
                 "y"
               ]
             }
-          },
-          "required": [
-            "items"
-          ]
+          }
         },
         {
           "additionalProperties": false,
+          "required": [
+            "id",
+            "type",
+            "subject",
+            "reference",
+            "side"
+          ],
           "properties": {
-            "id": true,
-            "strength": true,
-            "priority": true,
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "strength": {
+              "enum": [
+                "required",
+                "preferred"
+              ]
+            },
+            "priority": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10
+            },
             "type": {
               "const": "place-relative"
             },
@@ -1442,19 +1486,31 @@
               "type": "number",
               "minimum": 0
             }
-          },
-          "required": [
-            "subject",
-            "reference",
-            "side"
-          ]
+          }
         },
         {
           "additionalProperties": false,
+          "required": [
+            "id",
+            "type",
+            "items",
+            "axis"
+          ],
           "properties": {
-            "id": true,
-            "strength": true,
-            "priority": true,
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "strength": {
+              "enum": [
+                "required",
+                "preferred"
+              ]
+            },
+            "priority": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10
+            },
             "type": {
               "const": "align"
             },
@@ -1471,18 +1527,30 @@
                 "y"
               ]
             }
-          },
-          "required": [
-            "items",
-            "axis"
-          ]
+          }
         },
         {
           "additionalProperties": false,
+          "required": [
+            "id",
+            "type",
+            "items"
+          ],
           "properties": {
-            "id": true,
-            "strength": true,
-            "priority": true,
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "strength": {
+              "enum": [
+                "required",
+                "preferred"
+              ]
+            },
+            "priority": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10
+            },
             "type": {
               "const": "group"
             },
@@ -1493,10 +1561,7 @@
                 "$ref": "#/$defs/id"
               }
             }
-          },
-          "required": [
-            "items"
-          ]
+          }
         }
       ],
       "description": "A required constraint that cannot be satisfied is an error, not a preference that was outvoted."

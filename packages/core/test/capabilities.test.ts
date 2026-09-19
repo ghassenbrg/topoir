@@ -68,8 +68,8 @@ describe("capability registry", () => {
   it("reports every document language the build accepts, with its real status", () => {
     const languages = capabilitiesOfKind("language");
     expect(languages.map((capability) => capability.id)).toEqual(["topoir.dev/v1alpha1", "topoir.dev/v1alpha2"]);
-    // v1alpha1 compiles; v1alpha2 validates structurally and does not yet compile. Saying
-    // both are implemented would be exactly the dishonesty T04 removed.
+    // Both compile now, but v1alpha2 has no acceptance corpus of its own and no revision
+    // or export operation accepts it, so calling it implemented would overstate it.
     expect(languages[0]?.maturity).toBe("implemented");
     expect(languages[1]?.maturity).toBe("experimental");
   });
