@@ -42,6 +42,10 @@ export interface LayoutRequest {
   readonly candidates?: number;
   /** A previous layout, when stable re-layout was asked for. */
   readonly prior?: GeometryView;
+  /** Relationship ids the author ordered, which define the primary path outright. */
+  readonly story?: readonly string[];
+  /** Required orderings, checked for impossibility against the model's own cycles. */
+  readonly requiredOrder?: readonly (readonly string[])[];
 }
 
 export interface AdmissionResult {

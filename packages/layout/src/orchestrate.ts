@@ -2,6 +2,7 @@ import type { LayoutEngine, LayoutResult, MeasuredView } from "@topoir/core";
 import type { Diagnostic } from "@topoir/schema";
 import { CompositionEngine, ElkLayoutEngine } from "@topoir/layout-elk";
 import { admit, NO_CAPABILITIES, type BackendCapabilities, type LayoutBackend, type LayoutRequest } from "./backend.js";
+import { analyzeSpine, orderingExclusions } from "./spine.js";
 
 /**
  * Layout orchestration (T15).
@@ -44,7 +45,17 @@ export function compositionBackend(): LayoutBackend {
   return {
     id: engine.id,
     capabilities: COMPOSITION_CAPABILITIES,
-    layout: async (view) => engine.layout(view),
+    layout: async (view, request) => {
+      // The spine decides which relationships order the layout. A feedback relationship is
+      // still drawn and routed; it just stops pushing its target a band further along.
+      const analysis = analyzeSpine(view, {
+        ...(request.story === undefined ? {} : { story: request.story }),
+        ...(request.requiredOrder === undefined ? {} : { requiredOrder: request.requiredOrder }),
+        viewId: view.id,
+      });
+      const result = await engine.layout(view, orderingExclusions(analysis));
+      return { ...result, diagnostics: [...analysis.diagnostics, ...result.diagnostics] };
+    },
   };
 }
 

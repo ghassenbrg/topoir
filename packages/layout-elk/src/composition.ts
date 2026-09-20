@@ -7,7 +7,12 @@ import { banded, type BandedSpacing } from "./banded.js";
 export class CompositionEngine implements LayoutEngine {
   readonly id = "topoir-composition-v1";
 
-  async layout(view: MeasuredView): Promise<LayoutResult> {
+  /**
+   * @param excludeFromOrdering relationship ids that must not influence layer assignment,
+   * from the caller's spine analysis. Empty by default, so nothing changes for a caller
+   * that does not supply one.
+   */
+  async layout(view: MeasuredView, excludeFromOrdering: ReadonlySet<string> = new Set()): Promise<LayoutResult> {
     const kind = view.design?.composition ?? "topology";
     if (["sequence", "comparison", "swimlanes", "architecture-map"].includes(kind) && view.edges.some((edge) => edge.sourcePort || edge.targetPort)) {
       return { diagnostics: [{ code: "TOP402_COMPOSITION_PORT_UNSUPPORTED", severity: "error", message: `${kind} does not yet support explicit endpoint ports. Use topology/layers or omit the port constraints.` }] };
@@ -48,7 +53,7 @@ export class CompositionEngine implements LayoutEngine {
       let best: { geometry: GeometryView; score: number; defects: number } | undefined;
       let evaluated = 0;
       for (const spacing of spacings) {
-        const placed = banded(view, spacing);
+        const placed = banded(view, spacing, excludeFromOrdering);
         for (const [distributeLanes, laneOrder] of routings) {
           const routed = separateCoincidentRoutes(view, refineRoutes(view, { ...placed, edges: routeEdges(view, placed.nodes, placed.groups, distributeLanes, laneOrder) }));
           const annotations = placeAnnotations(view, routed.nodes, routed.groups, routed.edges, placed.bounds.height);

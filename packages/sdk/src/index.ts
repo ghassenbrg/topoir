@@ -282,7 +282,11 @@ export class TopoIRCompiler {
       // enforce fails here rather than producing geometry that quietly ignored it.
       const layout =
         options.layoutEngine === undefined
-          ? await orchestrate(measured, compositionBackend(), { constraints: presentation.plan.constraints })
+          ? await orchestrate(measured, compositionBackend(), {
+              constraints: presentation.plan.constraints,
+              story: presentation.plan.story.length > 0 ? presentation.plan.story : (view.design?.story ?? []),
+              requiredOrder: presentation.plan.constraints.filter((entry) => entry.type === "order" && entry.strength === "required").map((entry) => entry.items),
+            })
           : await layoutEngine.layout(measured);
       diagnostics.push(...layout.diagnostics);
       if (layout.geometry === undefined) continue;

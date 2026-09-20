@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-19. This file is the live execution ledger for the design program.
 
-**Program state: in progress. M0, M1 and M2 complete. Next task: T16. Current milestone: M3 (T16–T20).**
+**Program state: in progress. M0, M1 and M2 complete. Next task: T16 slice 2 (group-level spine ordering). Current milestone: M3 (T16–T20).**
 
 The full review previously verified `bc64cf2`: 91 tests in 15 files passed; 240/240 synthetic cases compiled without hard geometry defects; 220/240 passed the selected defect counters; six reference candidates were deterministic with no approved parity recorded. These are historical baseline observations, not evidence that the tasks below are implemented. The design-writing task added documents/examples only.
 
@@ -26,7 +26,7 @@ Allowed task states: `not_started`, `in_progress`, `implemented_pending_gate`, `
 | T13 | M2 | complete | Style resolution with authored-token tracking, semantic roles surviving focus/muting, surface-aware text colour. Fixed all 9 invisible-text corpus cases with zero golden changes. See session entry. |
 | T14 | M2 | complete | valid/completion/accepted separated, one gate order for all families, lexicographic candidate vector, absent metrics stay absent. Legacy `ok` preserved. See session entry. |
 | T15 | M2 | complete | `@topoir/layout` orchestration with declared backend capabilities and constraint admission; `layout-elk` unchanged as an adapter. See session entry. |
-| T16 | M3 | not_started | |
+| T16 | M3 | in_progress | Spine analysis, feedback roles, supporting classification and impossible-order reporting land. **Trust-zone progression is measurably NOT met** — the spine crosses group boundaries and `banded` orders within each group independently. See session entry. |
 | T17 | M3 | not_started | |
 | T18 | M3 | not_started | |
 | T19 | M3 | not_started | |
@@ -1370,3 +1370,73 @@ All twelve original review defects are fixed rather than reported.
 
 **Next ready task: T16** (primary path and supporting regions), which opens M3. Its
 dependencies T15 and T12 are complete.
+
+### T16 slice 1 — request spine analysis — 2026-09-20
+
+**Task: T16 — primary path and supporting regions. State: in_progress.**
+
+Baseline commit `a8377dd` (T15). No unrelated worktree changes.
+
+**Read the acceptance table below before relying on this. One of the three criteria is
+measurably not met, and I am not claiming it.**
+
+**Behavior implemented** (`packages/layout/src/spine.ts`). Layering treated every
+relationship as forward progress, so a callback pushed its target a band further along and
+the primary flow stopped reading in the order it happens in. `analyzeSpine` separates three
+roles — **spine** (advances the path), **branch** (leaves it, such as a write to state) and
+**feedback** (runs backwards) — and `orderingExclusions` gives placement the set that must
+not influence layer assignment. Feedback relationships are still drawn, routed and counted.
+
+A write to state does not extend the primary path, which is why a three-tier system reads
+left to right rather than with the database in the middle of the flow. Components reached
+only by branches are classified as supporting.
+
+**Acceptance, measured:**
+
+| Criterion | State | Evidence |
+| --- | --- | --- |
+| Pockito gateway route order correct, identity has a supporting region | **Met** | Spine reads `web-app → traefik → pockito-api → pockito-core → postgresql`, monotonic left to right. `keycloak` is classified supporting and placed outside the spine's y-band. Route order preserved — the render is byte-identical |
+| Impossible monotonic paths are reported | **Met** | `TOP472_MONOTONIC_PATH_IMPOSSIBLE` names the cycle so an author knows which relationship to break, and fires only when the cycle is among the *constrained* components |
+| Trust-zone primary flow reads in the requested progression | **NOT met** | Measured: the spine is `customer → edge → lb → frontend → core → f5 → card-core`, but the placed x-order is `customer@52, edge@322, f5@712, card-core@954, frontend@1059, core@1342, lb@1648`. Not monotonic |
+
+**Why the trust-zone criterion fails, and what it needs.** The spine crosses trust-zone
+boundaries, and `banded` arranges *within* each group independently — nothing orders the
+groups themselves by where the spine enters them. Fixing it means making group placement
+respect the spine, which is a substantive layout change rather than a parameter.
+
+**Two bugs in my own analysis, both found by probing rather than by the tests I had written.**
+The first tests only covered acyclic fixtures, and both bugs needed a cycle:
+
+- On a cycle, the longest-chain walk returned the repeated component, so the spine contained it **twice**. The index map then took its *last* position, which marked the real request as feedback and the callback as forward progress. A probe showed the result placing `api` last where plain layering placed it second — strictly worse than doing nothing.
+- With that fixed, a pure cycle still picked its start alphabetically, producing a spine running **backwards** through the model with the same consequence. Start selection now prefers entry-point kinds and low in-degree. Both cases are now tests.
+
+**The exclusion is correct and currently inert, measured rather than assumed.** Across all
+240 generated cases, soft-defect totals with and without spine exclusion are **identical
+(129 vs 129), with zero cases differing**. Of 23 published views, two contain feedback
+relationships and both use compositions (`sequence`, `comparison`) that do not go through
+`banded`. So the mechanism changes nothing today. It is wired because it is correct and free,
+not because it has demonstrated a gain — and that distinction is recorded rather than
+presented as an improvement.
+
+**Files added:** `packages/layout/src/spine.ts`, `packages/layout/test/spine.test.ts` (17
+assertions). **Changed:** `layout-elk/src/banded.ts` and `composition.ts` (optional exclusion
+set, empty by default), `layout/src/orchestrate.ts`, `layout/src/backend.ts`,
+`sdk/src/index.ts`, `schema/src/diagnostics.ts` (`TOP472`).
+
+**Verification:**
+
+| Command | Outcome |
+| --- | --- |
+| `pnpm exec vitest run packages/layout/test/spine.test.ts` | 17 passed |
+| `pnpm check` | build + typecheck clean; **498 tests in 35 files passed** (481 after T15) |
+| render comparison | all 20 byte-identical |
+| corpus A/B, spine vs plain | 129 vs 129 soft defects, 0 cases differing |
+
+**Remaining for T16:**
+
+- **Group-level spine ordering** — place boundaries by where the spine enters them, which is what the trust-zone criterion needs.
+- **Explicit supporting bands** — supporting components are classified but not placed in a reserved band. Pockito's identity lands outside the spine band emergently, not by design.
+- **Branch/feedback decomposition and mixed local orientation** — not started.
+
+**Next ready task: T16 slice 2.** T17 also depends on T15 and T11 and is ready if the
+placement work is deferred.

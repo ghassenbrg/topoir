@@ -63,7 +63,13 @@ export interface BandedSpacing {
 }
 
 
-export function banded(view: MeasuredView, spacing: BandedSpacing): GeometryView {
+/**
+ * @param excludeFromOrdering relationship ids that must not influence layer assignment.
+ * A feedback relationship — a callback, an ack, a retry — is still drawn and routed, but
+ * treating it as forward progress pushes its target a band further along and the primary
+ * flow stops reading in the order it happens in. See `analyzeSpine` in `@topoir/layout`.
+ */
+export function banded(view: MeasuredView, spacing: BandedSpacing, excludeFromOrdering: ReadonlySet<string> = new Set()): GeometryView {
   const horizontal = view.layout.direction === "right" || view.layout.direction === "left";
   const groupsByParent = new Map<string | undefined, MeasuredGroup[]>();
   for (const group of view.groups) {
@@ -89,7 +95,7 @@ export function banded(view: MeasuredView, spacing: BandedSpacing): GeometryView
       ...(nodesByGroup.get(groupId) ?? []).map((node) => ({ id: node.id, width: node.width, height: node.height, order: node.order, members: [node.id], node })),
     ];
     const mode = group?.layout.mode ?? "layered";
-    const placements = arrange(items, view, spacing, horizontal, mode, group);
+    const placements = arrange(items, view, spacing, horizontal, mode, group, excludeFromOrdering);
     const contentWidth = Math.max(0, ...placements.map((placement) => placement.dx + placement.item.width));
     const contentHeight = Math.max(0, ...placements.map((placement) => placement.dy + placement.item.height));
     if (group === undefined) return { width: contentWidth, height: contentHeight, placements };
@@ -144,6 +150,7 @@ function arrange(
   horizontal: boolean,
   mode: MeasuredGroup["layout"]["mode"] | "layered",
   group: MeasuredGroup | undefined,
+  excludeFromOrdering: ReadonlySet<string> = new Set(),
 ): Placement[] {
   if (items.length === 0) return [];
   const gap = group?.layout.gap ?? spacing.node;
@@ -190,6 +197,7 @@ function arrange(
   for (const item of items) for (const member of item.members) ownerOf.set(member, item.id);
   const links: { readonly from: string; readonly to: string }[] = [];
   for (const edge of view.edges) {
+    if (excludeFromOrdering.has(edge.id)) continue;
     const from = ownerOf.get(edge.from);
     const to = ownerOf.get(edge.to);
     if (from !== undefined && to !== undefined && from !== to) links.push({ from, to });
