@@ -318,7 +318,7 @@ function barycenterSweeps(
 }
 
 /** Ports come straight from the measured component, so a compartment and its connector cannot disagree. */
-function portsFor(node: MeasuredNode, x: number, y: number): GeometryPort[] {
+export function portsFor(node: MeasuredNode, x: number, y: number): GeometryPort[] {
   return node.ports.map((port) => {
     const side = port.side === "auto" ? "east" : port.side;
     const slot = port.slot;

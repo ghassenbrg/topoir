@@ -1,7 +1,7 @@
 import { analyzeGeometry, type QualityReport, type GeometryView, type GeometryNode, type GeometryGroup, type GeometryEdge, type GeometryPort, type GeometryAnnotation, type LayoutResult, type LayoutEngine, type MeasuredView, type Point, type Rect, type MeasuredNode } from "@topoir/core";
 import { ElkLayoutEngine } from "./index.js";
 import { obstacleRoute, segmentHitsRect } from "./routing.js";
-import { banded, type BandedSpacing } from "./banded.js";
+import { banded, portsFor, type BandedSpacing } from "./banded.js";
 import { alignToAnchors, orderForReading, ordersAlongReading, spinePositions, type OrderingHints } from "./ordering.js";
 
 /** Compiler-owned composition. Fixed candidate order is also the tie-break order. */
@@ -15,8 +15,11 @@ export class CompositionEngine implements LayoutEngine {
    */
   async layout(view: MeasuredView, hints: OrderingHints = {}): Promise<LayoutResult> {
     const kind = view.design?.composition ?? "topology";
-    if (["sequence", "comparison", "swimlanes", "architecture-map"].includes(kind) && view.edges.some((edge) => edge.sourcePort || edge.targetPort)) {
-      return { diagnostics: [{ code: "TOP402_COMPOSITION_PORT_UNSUPPORTED", severity: "error", message: `${kind} does not yet support explicit endpoint ports. Use topology/layers or omit the port constraints.` }] };
+    // A sequence draws lifelines rather than component faces, so there is nowhere for a
+    // declared port to attach. The panel families have component faces like any other and
+    // now emit real port geometry, so they honour a declared port.
+    if (kind === "sequence" && view.edges.some((edge) => edge.sourcePort || edge.targetPort)) {
+      return { diagnostics: [{ code: "TOP402_COMPOSITION_PORT_UNSUPPORTED", severity: "error", message: `${kind} draws lifelines rather than component faces, so an explicit endpoint port has nowhere to attach. Use topology, layers, architecture or architecture-map, or omit the port constraints.` }] };
     }
     if (kind === "sequence") return { geometry: sequence(view), diagnostics: [], metrics: { candidatesEvaluated: 1 } };
     if (kind === "comparison" || kind === "swimlanes" || kind === "architecture-map") {
@@ -314,7 +317,10 @@ function panels(view: MeasuredView, kind: "comparison" | "swimlanes" | "architec
   const root = build();
   const nodes: GeometryNode[] = [], groups: GeometryGroup[] = [];
   const walk = (block: Block, x: number, y: number) => {
-    if (block.node) nodes.push({ id: block.id, x, y, width: block.width, height: block.height, ports: [] });
+    // Real port geometry, exactly as the banded family derives it. Emitting an empty list
+    // here is the only reason the panel families could not honour an endpoint port: the
+    // router already looks a declared port up by id and attaches to it.
+    if (block.node) nodes.push({ id: block.id, x, y, width: block.width, height: block.height, ports: portsFor(block.node, x, y) });
     else {
       if (block !== root) groups.push({ id: block.id, x, y, width: block.width, height: block.height, ...(block.parent ? { parent: block.parent } : {}) });
       for (const child of block.children ?? []) walk(child.block, x + child.x, y + child.y);

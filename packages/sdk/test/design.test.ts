@@ -59,11 +59,41 @@ describe("visual design compiler", () => {
     expect(result.artifacts.find((a) => a.format === "png")?.content).toBeInstanceOf(Uint8Array);
   });
 
-  it("does not silently discard explicit ports in experimental composition families", async () => {
-    const source = { apiVersion: "topoir.dev/v1alpha1", kind: "Architecture", metadata: { name: "ports" }, model: { nodes: [{ id: "a", kind: "api", ports: [{ id: "out", side: "east" }] }, { id: "b", kind: "database" }], edges: [{ id: "write", from: "a", to: "b", sourcePort: "out" }] }, views: [{ id: "overview", design: { composition: "comparison" } }] };
-    const result = await new TopoIRCompiler().compile(JSON.stringify(source));
+  /**
+   * A declared port is never silently discarded.
+   *
+   * This used to be satisfied by refusing outright: the panel families emitted no port
+   * geometry, so binding an edge to a port failed with `TOP402`. Honouring the binding is
+   * the stronger way to satisfy the same guarantee, and it is what the reference diagrams
+   * need — one router splitting `/app/*` from `/api/*` is their main structure. The
+   * assertion moved up accordingly; it was not relaxed.
+   */
+  const ported = (composition: string) => ({
+    apiVersion: "topoir.dev/v1alpha1", kind: "Architecture", metadata: { name: "ports" },
+    model: {
+      nodes: [{ id: "a", kind: "api", ports: [{ id: "out", label: "/out/*", side: "east" }] }, { id: "b", kind: "database" }],
+      edges: [{ id: "write", from: "a", to: "b", sourcePort: "out" }],
+    },
+    views: [{ id: "overview", design: { composition } }],
+  });
+
+  it.each(["comparison", "swimlanes", "architecture-map"])("attaches a connector to the port it declares in %s", async (composition) => {
+    const result = await new TopoIRCompiler().compile(JSON.stringify(ported(composition)));
+    expect(result.ok, result.diagnostics.map((d) => d.message).join("; ")).toBe(true);
+    const geometry = result.views[0]!.geometry!;
+    const port = geometry.nodes.find((node) => node.id === "a")!.ports.find((entry) => entry.id === "out");
+    expect(port, "the port must exist in the geometry, not just the model").toBeDefined();
+    const start = geometry.edges.find((edge) => edge.id === "write")!.points[0]!;
+    // Exactly on the port, not merely near the component it belongs to.
+    expect(Math.hypot(start.x - port!.x, start.y - port!.y)).toBeLessThan(0.5);
+  });
+
+  it("still refuses a port in a sequence, where there is no component face to attach to", async () => {
+    const result = await new TopoIRCompiler().compile(JSON.stringify(ported("sequence")));
     expect(result.ok).toBe(false);
     expect(result.diagnostics.map((d) => d.code)).toContain("TOP402_COMPOSITION_PORT_UNSUPPORTED");
+    // The message says what to use instead rather than only what failed.
+    expect(result.diagnostics.find((d) => d.code === "TOP402_COMPOSITION_PORT_UNSUPPORTED")?.message).toContain("architecture-map");
   });
 
   it("measures composite port compartments and multiple assets before layout", async () => {

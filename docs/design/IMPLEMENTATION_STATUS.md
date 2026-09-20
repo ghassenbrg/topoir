@@ -1765,3 +1765,85 @@ own it.
 **Reference parity remains 0/6 `unreviewed`.** These two reproductions are not candidates for
 approval; they are evidence of what is missing.
 
+---
+
+## T18 slice 1 — endpoint ports in the panel families (2026-09-20)
+
+Taken ahead of T17 because it unblocks two of the six references; recorded as a deviation
+from roadmap order rather than a silent reordering.
+
+### Landed: a declared port is now honoured, not refused
+
+`routeEdges` already looked a declared port up by id and attached to it. The only reason the
+panel families could not honour one is that `panels()` emitted `ports: []` for every
+component, so there was nothing to find. It now emits real port geometry via the same
+`portsFor` the banded family uses.
+
+`TOP402_COMPOSITION_PORT_UNSUPPORTED` now fires only for `sequence`, which draws lifelines
+rather than component faces and genuinely has nowhere to attach; its message names the
+families that do support ports instead of only saying what failed.
+
+Verified by distance, not by compilation: the connector start lands **0.0px** from the
+declared port. `architecture-map`, `swimlanes` and `comparison` are each asserted.
+
+One existing test asserted the refusal. Its guarantee — *a declared port is never silently
+discarded* — is now met the stronger way, by honouring the binding, so the assertion was
+moved up rather than relaxed; `sequence` still has its refusal pinned.
+
+### Reverted: region entry alignment made the target diagram worse
+
+The tangle in the exple3 reproduction comes from the path leaving one region mid-right and
+arriving at a region below whose own packing put the entry component at the far left. I
+implemented an alignment pass: slide a region right so its entry component sits under the
+component the path arrives from, then re-flow the row.
+
+It worked geometrically — `f5` landed at exactly the same x as `card-agent-core`, `dx=0` —
+and made the diagram **measurably worse**:
+
+| | without alignment | with alignment |
+| --- | --- | --- |
+| edge crossings | **4** | 9 |
+| `legacy` detour | **1.73x** / 6 bends | 5.10x / 5 bends |
+| bounds | 1728x924 | 1844x924 |
+
+The first version was worse still: widening a region in place let FDC's boundary swallow the
+External Locations region beside it, the router treated the pair as one obstacle and sent a
+connector around the whole canvas (5.89x, plus 2 illegal boundary crossings). Re-flowing the
+row fixed the overlap but not the detour.
+
+**Why it fails:** aligning the entry point is not enough when the corridor between the two
+is occupied. `card-agent-core` exits south correctly — the faces were never wrong — but
+`Cluster 1` and the anchored note sit directly beneath it inside the zone, so the router goes
+around them. The real dependency is **keeping the corridor between a spine exit and the next
+region clear of supporting components**, which is a placement change, not an alignment one.
+
+Reverted rather than shipped. The measurements are recorded here so the next attempt starts
+from them instead of rediscovering that alignment alone is insufficient.
+
+### Verification
+
+| Command | Outcome |
+| --- | --- |
+| `pnpm check` | **553 tests in 37 files passed** (550 before) |
+| render comparison | **no golden changed** — no shipped example binds an edge to a port in a panel family |
+| `pnpm benchmark:generalization` | identical case list to baseline |
+| port attachment | 0.0px from the declared port, in all three panel families |
+| load-bearing check | restoring `ports: []` fails 3 tests |
+
+**Changed:** `layout-elk/src/banded.ts` (export `portsFor`), `composition.ts`.
+**Tests:** `sdk/test/design.test.ts` — refusal test replaced by 3 attachment assertions plus
+a narrowed refusal.
+
+### State of the two reproductions
+
+`ref-03` now draws its route split, and still has the trunk tangle: 4 crossings, `legacy` at
+1.73x over 6 bends, and a clear corridor is the blocker. `ref-01` is unchanged — structurally
+close, honestly rejected for 2 illegal boundary crossings from the same cause, a nested VM
+reaching a topic in its enclosing zone.
+
+Neither is a reproduction yet. **Reference parity remains 0/6 `unreviewed`.**
+
+**Next: clear the exit corridor** — supporting components and anchored notes must not sit
+between a spine exit and the region the path continues into. That is the blocker both
+reproductions now share, and it subsumes the reverted alignment.
+
