@@ -43,6 +43,18 @@ export interface SpineAnalysis {
    * supporting band rather than inline in the primary progression.
    */
   readonly supporting: ReadonlySet<string>;
+  /**
+   * For each component off the primary path, the component it hangs off.
+   *
+   * A session cache belongs under the service that writes to it, not wherever a grid
+   * happened to wrap. Without this a supporting component is placed by packing order, and
+   * the reader has to trace a connector to find out whose state it is.
+   *
+   * The anchor is the source of an incoming branch, preferring one on the primary path:
+   * a store written by both a spine component and a supporting one belongs under the
+   * spine component, which is the one the reader is following.
+   */
+  readonly anchors: ReadonlyMap<string, string>;
   readonly diagnostics: readonly Diagnostic[];
 }
 
@@ -102,7 +114,23 @@ export function analyzeSpine(view: MeasuredView, options: SpineOptions = {}): Sp
     if (incident.every((edge) => edgeRoles.get(edge.id) !== "spine")) supporting.add(node.id);
   }
 
-  // 4. A required ordering that contains a cycle can never be monotonic. Reporting it is
+  // 4. Anchor each off-path component to whatever reaches it.
+  const anchors = new Map<string, string>();
+  for (const node of view.nodes) {
+    if (spineIndex.has(node.id)) continue;
+    const incoming = view.edges.filter((edge) => edge.to === node.id && edge.from !== node.id);
+    if (incoming.length === 0) continue;
+    // A spine source wins; among equals the earliest on the path, then the id, so the
+    // anchor is stable and independent of declaration order.
+    const best = [...incoming].sort((left, right) => {
+      const leftRank = spineIndex.get(left.from) ?? Number.POSITIVE_INFINITY;
+      const rightRank = spineIndex.get(right.from) ?? Number.POSITIVE_INFINITY;
+      return leftRank - rightRank || left.from.localeCompare(right.from, "en");
+    })[0];
+    if (best !== undefined) anchors.set(node.id, best.from);
+  }
+
+  // 5. A required ordering that contains a cycle can never be monotonic. Reporting it is
   // the difference between "the layout ignored your constraint" and "what you asked for
   // cannot exist".
   for (const order of options.requiredOrder ?? []) {
@@ -126,7 +154,7 @@ export function analyzeSpine(view: MeasuredView, options: SpineOptions = {}): Sp
     });
   }
 
-  return { spine, source: authored ? "authored" : "inferred", edgeRoles, supporting, diagnostics };
+  return { spine, source: authored ? "authored" : "inferred", edgeRoles, supporting, anchors, diagnostics };
 }
 
 /** The component order an ordered list of relationships walks through. */

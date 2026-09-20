@@ -2,7 +2,7 @@ import { analyzeGeometry, type QualityReport, type GeometryView, type GeometryNo
 import { ElkLayoutEngine } from "./index.js";
 import { obstacleRoute, segmentHitsRect } from "./routing.js";
 import { banded, type BandedSpacing } from "./banded.js";
-import { orderForReading, ordersAlongReading, spinePositions, type OrderingHints } from "./ordering.js";
+import { alignToAnchors, orderForReading, ordersAlongReading, spinePositions, type OrderingHints } from "./ordering.js";
 
 /** Compiler-owned composition. Fixed candidate order is also the tie-break order. */
 export class CompositionEngine implements LayoutEngine {
@@ -221,6 +221,7 @@ interface Block { id: string; width: number; height: number; node?: MeasuredNode
 
 function panels(view: MeasuredView, kind: "comparison" | "swimlanes" | "architecture-map", distributeLanes: boolean, laneOrder: LaneOrder, hints: OrderingHints = {}): GeometryView {
   const spineIndex = spinePositions(hints.spine);
+  const anchors = hints.anchors ?? new Map<string, string>();
   const horizontal = view.layout.direction === "right" || view.layout.direction === "left";
   const membersOf = (groupId: string): string[] => [
     ...view.nodes.filter((node) => node.group === groupId).map((node) => node.id),
@@ -300,11 +301,15 @@ function panels(view: MeasuredView, kind: "comparison" | "swimlanes" | "architec
     const gap = root ? (kind === "comparison" ? 180 : 96) : group?.layout.gap ?? 48;
     const pad = root ? 24 : 28;
     const top = root ? 24 : 62;
-    const colWidths = Array.from({ length: cols }, (_, col) => Math.max(0, ...blocks.filter((_, i) => i % cols === col).map((block) => block.width)));
-    const rows = Math.ceil(blocks.length / cols);
-    const rowHeights = Array.from({ length: rows }, (_, row) => Math.max(0, ...blocks.slice(row * cols, (row + 1) * cols).map((block) => block.height)));
-    const children = blocks.map((block, i) => ({ block, x: pad + colWidths.slice(0, i % cols).reduce((a, b) => a + b + gap, 0), y: top + rowHeights.slice(0, Math.floor(i / cols)).reduce((a, b) => a + b + gap, 0) }));
-    return { id: id ?? "__root", width: Math.max(group ? group.labelText.width + 56 : 0, pad * 2 + colWidths.reduce((a, b) => a + b, 0) + (cols - 1) * gap), height: top + pad + rowHeights.reduce((a, b) => a + b, 0) + Math.max(0, rows - 1) * gap, children, members: [], ...(group?.parent ? { parent: group.parent } : {}) };
+    // Supporting siblings slide under whatever they hang off, so a store sits below the
+    // service that writes to it rather than below whichever sibling shares its column.
+    const cell = alignToAnchors(blocks, cols, anchors, (block) => block.node !== undefined);
+    const usedCols = Math.max(1, ...cell.map((slot) => slot.column + 1));
+    const colWidths = Array.from({ length: usedCols }, (_, col) => Math.max(0, ...blocks.filter((_, i) => cell[i]!.column === col).map((block) => block.width)));
+    const rows = Math.max(1, ...cell.map((slot) => slot.row + 1));
+    const rowHeights = Array.from({ length: rows }, (_, row) => Math.max(0, ...blocks.filter((_, i) => cell[i]!.row === row).map((block) => block.height)));
+    const children = blocks.map((block, i) => ({ block, x: pad + colWidths.slice(0, cell[i]!.column).reduce((a, b) => a + b + gap, 0), y: top + rowHeights.slice(0, cell[i]!.row).reduce((a, b) => a + b + gap, 0) }));
+    return { id: id ?? "__root", width: Math.max(group ? group.labelText.width + 56 : 0, pad * 2 + colWidths.reduce((a, b) => a + b, 0) + (usedCols - 1) * gap), height: top + pad + rowHeights.reduce((a, b) => a + b, 0) + Math.max(0, rows - 1) * gap, children, members: [], ...(group?.parent ? { parent: group.parent } : {}) };
   };
   const root = build();
   const nodes: GeometryNode[] = [], groups: GeometryGroup[] = [];

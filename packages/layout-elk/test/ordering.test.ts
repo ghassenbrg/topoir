@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { loadDocument, measureView, projectView, resolveTheme, type MeasuredView } from "@topoir/core";
 import { bestRowSplit, CompositionEngine } from "../src/composition.js";
-import { compareForReading, orderForReading, ordersAlongReading, rankForReading, spineEntry, spinePositions } from "../src/ordering.js";
+import { alignToAnchors, compareForReading, orderForReading, ordersAlongReading, rankForReading, spineEntry, spinePositions } from "../src/ordering.js";
 
 /**
  * T16 slice 2 — reading order across siblings.
@@ -215,5 +215,58 @@ describe("the path only orders a sequence that runs the same way it does", () =>
     expect(ordersAlongReading("layered", true)).toBe(false);
     expect(ordersAlongReading("layered", false)).toBe(false);
     expect(ordersAlongReading("auto", true)).toBe(false);
+  });
+});
+
+describe("supporting siblings slide under what they hang off", () => {
+  const leaf = () => true;
+  const cells = (ids: readonly string[], columns: number, anchors: Record<string, string>) =>
+    alignToAnchors(ids.map((id) => item(id, [id])), columns, new Map(Object.entries(anchors)), leaf);
+
+  it("moves a store into the column of the service that writes to it", () => {
+    // webapp frontend core / redis postgres -> redis under frontend, postgres under core.
+    const placed = cells(["webapp", "frontend", "core", "redis", "postgres"], 3, { redis: "frontend", postgres: "core" });
+    expect(placed[3]).toEqual({ row: 1, column: 1 });
+    expect(placed[4]).toEqual({ row: 1, column: 2 });
+  });
+
+  it("resolves the two stores that each want the other's cell", () => {
+    /**
+     * Packed side by side, redis wants column 1 and postgres wants column 2; considered
+     * once in order, redis is blocked by the postgres that has not moved yet. A single
+     * pass left redis where it started, which is the bug this asserts against.
+     */
+    const placed = cells(["webapp", "frontend", "core", "redis", "postgres"], 3, { redis: "frontend", postgres: "core" });
+    expect(new Set(placed.map((slot) => `${slot.row}:${slot.column}`)).size).toBe(placed.length);
+  });
+
+  it("never puts two siblings in the same cell", () => {
+    const placed = cells(["a", "b", "c", "d", "e", "f"], 3, { d: "c", e: "c", f: "b" });
+    expect(new Set(placed.map((slot) => `${slot.row}:${slot.column}`)).size).toBe(placed.length);
+  });
+
+  it("leaves a sibling alone when the target cell is taken", () => {
+    // Only an unambiguous improvement is made; nothing is ever displaced.
+    const placed = cells(["a", "b", "c", "d"], 2, { c: "b", d: "b" });
+    expect(placed.filter((slot) => slot.row === 1 && slot.column === 1)).toHaveLength(1);
+  });
+
+  it("does not move a sibling beside its anchor, only under it", () => {
+    // Same row means reordering the reading sequence, which is not this rule's business.
+    const placed = cells(["a", "b"], 2, { b: "a" });
+    expect(placed[1]).toEqual({ row: 0, column: 1 });
+  });
+
+  it("does not slide a boundary around", () => {
+    const blocks = [item("a", ["a"]), item("zone", ["x"]), item("s", ["s"])];
+    const placed = alignToAnchors(blocks, 2, new Map([["zone", "a"], ["s", "a"]]), (entry) => entry.id !== "zone");
+    expect(placed[1]).toEqual({ row: 0, column: 1 });
+  });
+
+  it("changes nothing when there are no anchors", () => {
+    const placed = cells(["a", "b", "c", "d"], 2, {});
+    expect(placed).toEqual([
+      { row: 0, column: 0 }, { row: 0, column: 1 }, { row: 1, column: 0 }, { row: 1, column: 1 },
+    ]);
   });
 });

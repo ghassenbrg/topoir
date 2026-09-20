@@ -110,6 +110,14 @@ export interface OrderingHints {
   readonly excludeFromOrdering?: ReadonlySet<string>;
   /** Components on the primary path, in the order a reader meets them. */
   readonly spine?: readonly string[];
+  /**
+   * For each component off the primary path, the component it hangs off.
+   *
+   * Unlike `spine`, this does not depend on a reading order being declared: a write to a
+   * store is a branch off whatever writes to it however the path was found, so an inferred
+   * analysis is as good as an authored one here.
+   */
+  readonly anchors?: ReadonlyMap<string, string>;
 }
 
 export const NO_HINTS: OrderingHints = {};
@@ -133,4 +141,54 @@ export function ordersAlongReading(mode: string, horizontal: boolean): boolean {
   if (mode === "row" || mode === "grid" || mode === "pack") return horizontal;
   if (mode === "column") return !horizontal;
   return false;
+}
+
+/**
+ * Grid cells, with supporting siblings moved under the sibling they hang off.
+ *
+ * Only a move that is unambiguously an improvement is made: the anchor has to be a sibling
+ * in this same container, already placed in an earlier row, and the target cell has to be
+ * free. Anything else keeps its packed cell, so this can shift a component but never
+ * displace one or leave two in the same place.
+ */
+export function alignToAnchors<T extends Orderable>(
+  ordered: readonly T[],
+  columns: number,
+  anchors: ReadonlyMap<string, string>,
+  isLeaf: (item: T) => boolean,
+): { row: number; column: number }[] {
+  const cell = ordered.map((_, index) => ({ row: Math.floor(index / columns), column: index % columns }));
+  // An item stands for every component drawn inside it, so a store anchored to a service
+  // inside a sibling boundary still finds that boundary.
+  const ownerItem = new Map<string, number>();
+  for (const [index, item] of ordered.entries()) for (const member of item.members) ownerItem.set(member, index);
+
+  const taken = new Set(cell.map((slot) => `${slot.row}:${slot.column}`));
+  // Repeated to a fixed point, because one move frees the cell another wanted. Two stores
+  // packed side by side each want the column of the service above them, and whichever is
+  // considered first is blocked by the one that has not moved yet.
+  for (let pass = 0; pass < ordered.length; pass += 1) {
+    let moved = false;
+    for (const [index, item] of ordered.entries()) {
+      // A boundary is not slid around; only a leaf component hangs off another.
+      if (!isLeaf(item)) continue;
+      const anchor = anchors.get(item.id);
+      if (anchor === undefined) continue;
+      const anchorIndex = ownerItem.get(anchor);
+      if (anchorIndex === undefined || anchorIndex === index) continue;
+      const target = cell[anchorIndex]!;
+      const here = cell[index]!;
+      // Under it, not beside it: same column, a later row. Moving within a row would
+      // reorder the reading sequence, which is not this rule's business.
+      if (target.row >= here.row || target.column === here.column) continue;
+      const key = `${here.row}:${target.column}`;
+      if (taken.has(key)) continue;
+      taken.delete(`${here.row}:${here.column}`);
+      taken.add(key);
+      cell[index] = { row: here.row, column: target.column };
+      moved = true;
+    }
+    if (!moved) break;
+  }
+  return cell;
 }

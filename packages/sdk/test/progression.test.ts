@@ -93,6 +93,23 @@ describe("the request spine reads in the order it happens in", () => {
     expect(new Set(met).size).toBe(met.length);
   });
 
+  it("puts a store directly under the component that writes to it", async () => {
+    /**
+     * The session cache belongs below the service that writes the session, and the context
+     * store below the one that writes the context. Packed by index they landed below
+     * whichever sibling happened to share a column, and the reader had to trace a dashed
+     * connector across the boundary to find out whose state each one was.
+     */
+    const geometry = await showcase();
+    const node = (id: string) => geometry.nodes.find((entry) => entry.id === id)!;
+    const centre = (id: string) => node(id).x + node(id).width / 2;
+    expect(Math.abs(centre("redis") - centre("frontend")), "session cache under agent front").toBeLessThan(40);
+    expect(Math.abs(centre("postgres") - centre("core")), "context store under agent core").toBeLessThan(40);
+    // Under, not beside.
+    expect(node("redis").y).toBeGreaterThan(node("frontend").y + node("frontend").height);
+    expect(node("postgres").y).toBeGreaterThan(node("core").y + node("core").height);
+  });
+
   it("keeps the components the path never reaches out of it", async () => {
     // Partner APIs, the caches and the stores are supporting; they must not sit between
     // two consecutive steps of the primary path and break the run.

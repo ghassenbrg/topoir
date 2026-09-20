@@ -232,3 +232,68 @@ describe("an authored path and an inferred one are not the same claim", () => {
     expect(analyzeSpine(chain, { story: ["nope"] }).source).toBe("inferred");
   });
 });
+
+describe("what a supporting component hangs off", () => {
+  const withStores = view(
+    [
+      { id: "client", kind: "client" }, { id: "frontend" }, { id: "core" },
+      { id: "redis", kind: "cache" }, { id: "postgres", kind: "database" },
+    ],
+    [
+      { id: "open", from: "client", to: "frontend" },
+      { id: "invoke", from: "frontend", to: "core" },
+      { id: "session", from: "frontend", to: "redis", kind: "write" },
+      { id: "context", from: "core", to: "postgres", kind: "write" },
+    ],
+  );
+
+  it("names the component that writes to it", () => {
+    // Without this a store is placed by packing order, and the reader has to trace a
+    // connector to find out whose state it is.
+    const { anchors } = analyzeSpine(withStores);
+    expect(anchors.get("redis")).toBe("frontend");
+    expect(anchors.get("postgres")).toBe("core");
+  });
+
+  it("anchors nothing to a component on the path itself", () => {
+    const { anchors } = analyzeSpine(withStores);
+    for (const id of analyzeSpine(withStores).spine) expect(anchors.has(id), id).toBe(false);
+  });
+
+  it("prefers a writer on the primary path over one off it", () => {
+    // A store written by both belongs under the component the reader is following.
+    const shared = view(
+      [{ id: "client", kind: "client" }, { id: "core" }, { id: "worker" }, { id: "db", kind: "database" }],
+      [
+        { id: "open", from: "client", to: "core" },
+        { id: "spawn", from: "core", to: "worker", kind: "write" },
+        { id: "w1", from: "worker", to: "db", kind: "write" },
+        { id: "w2", from: "core", to: "db", kind: "write" },
+      ],
+    );
+    expect(analyzeSpine(shared, { story: ["open"] }).anchors.get("db")).toBe("core");
+  });
+
+  it("is independent of the order the relationships were declared in", () => {
+    const reversed = view(
+      [{ id: "client", kind: "client" }, { id: "core" }, { id: "worker" }, { id: "db", kind: "database" }],
+      [
+        { id: "w1", from: "worker", to: "db", kind: "write" },
+        { id: "w2", from: "core", to: "db", kind: "write" },
+        { id: "open", from: "client", to: "core" },
+        { id: "spawn", from: "core", to: "worker", kind: "write" },
+      ],
+    );
+    expect(analyzeSpine(reversed, { story: ["open"] }).anchors.get("db")).toBe("core");
+  });
+
+  it("says nothing about a component nothing reaches", () => {
+    const orphaned = view([{ id: "client", kind: "client" }, { id: "alone" }], []);
+    expect(analyzeSpine(orphaned).anchors.has("alone")).toBe(false);
+  });
+
+  it("does not anchor a component to itself", () => {
+    const loop = view([{ id: "a", kind: "client" }, { id: "b" }], [{ id: "self", from: "b", to: "b" }, { id: "e", from: "a", to: "b" }]);
+    expect(analyzeSpine(loop).anchors.get("b")).not.toBe("b");
+  });
+});

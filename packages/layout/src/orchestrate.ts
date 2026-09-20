@@ -60,6 +60,9 @@ export function compositionBackend(): LayoutBackend {
       const result = await engine.layout(view, {
         excludeFromOrdering: orderingExclusions(analysis),
         ...(order === undefined ? {} : { spine: order }),
+        // Anchors are offered whatever the path's provenance: a write to a store is a
+        // branch off whatever writes to it however the path was found.
+        anchors: analysis.anchors,
       });
       return { ...result, diagnostics: [...analysis.diagnostics, ...result.diagnostics] };
     },

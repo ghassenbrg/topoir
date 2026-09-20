@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-20. This file is the live execution ledger for the design program.
 
-**Program state: in progress. M0, M1 and M2 complete. Next task: T16 slice 3 (explicit supporting bands). Current milestone: M3 (T16–T20).**
+**Program state: in progress. M0, M1 and M2 complete. Next task: T17 (correspondence, wrapping, overview/detail). Current milestone: M3 (T16–T20).**
 
 The full review previously verified `bc64cf2`: 91 tests in 15 files passed; 240/240 synthetic cases compiled without hard geometry defects; 220/240 passed the selected defect counters; six reference candidates were deterministic with no approved parity recorded. These are historical baseline observations, not evidence that the tasks below are implemented. The design-writing task added documents/examples only.
 
@@ -26,7 +26,7 @@ Allowed task states: `not_started`, `in_progress`, `implemented_pending_gate`, `
 | T13 | M2 | complete | Style resolution with authored-token tracking, semantic roles surviving focus/muting, surface-aware text colour. Fixed all 9 invisible-text corpus cases with zero golden changes. See session entry. |
 | T14 | M2 | complete | valid/completion/accepted separated, one gate order for all families, lexicographic candidate vector, absent metrics stay absent. Legacy `ok` preserved. See session entry. |
 | T15 | M2 | complete | `@topoir/layout` orchestration with declared backend capabilities and constraint admission; `layout-elk` unchanged as an adapter. See session entry. |
-| T16 | M3 | in_progress | Slices 1–2 land: spine analysis, feedback roles, impossible-order reporting, and reading order across siblings. **Trust-zone progression now met and asserted** (`packages/sdk/test/progression.test.ts`). Supporting bands and branch/feedback decomposition still outstanding. See session entries. |
+| T16 | M3 | implemented_pending_gate | Slices 1–3 land: spine analysis, feedback roles, impossible-order reporting, reading order across siblings, and supporting components anchored under their owner. All three acceptance criteria met and asserted (`packages/sdk/test/progression.test.ts`). **Gate: target-size visual review** — a human audit of the slice-2 render is recorded below with 19 findings; reference parity remains 0/6 `unreviewed`. Mixed local orientation deferred to T18. See session entries. |
 | T17 | M3 | not_started | |
 | T18 | M3 | not_started | |
 | T19 | M3 | not_started | |
@@ -1564,3 +1564,120 @@ rendered comparison above, not by a recorded review.
 
 **Next ready task: T16 slice 3 (supporting bands).** T17 also depends on T15 and T11 and is
 ready.
+
+---
+
+## T16 slice 3 — supporting components hang off their owner (2026-09-20)
+
+**State: T16's three acceptance criteria are met.** Trust-zone primary flow reads in the
+requested progression (slice 2); Pockito gateway route order stays correct and is pinned;
+impossible monotonic paths are reported (`TOP472`, slice 1). Identity having a *supporting
+region* is now by construction rather than emergent.
+
+### What changed
+
+`analyzeSpine` gained `anchors`: for each component off the primary path, the component it
+hangs off — the source of an incoming branch, preferring one on the path, then the earliest
+position, then the id, so it is stable and independent of declaration order. A store written
+by both a spine component and a supporting one anchors to the spine component, which is the
+one the reader is following.
+
+`alignToAnchors` (in `ordering.ts`, shared by `banded` and `panels`) then slides a supporting
+sibling into its anchor's column. Only an unambiguous improvement is made: the anchor must be
+a sibling in the same container, already placed in an earlier row, and the target cell must
+be free. It can shift a component but never displace one, and never leaves two in a cell.
+
+Unlike the reading order, anchors are offered **whatever the path's provenance** — a write to
+a store is a branch off whatever writes to it however the path was found — so this is not
+gated on an authored story.
+
+Measured on the showcase: session cache moved under Agent front and context store under Agent
+core (both previously below whichever sibling shared their column), and edge crossings went
+**10 → 9**. The dashed state connectors are now short vertical drops instead of diagonals
+across the boundary.
+
+### A bug the first attempt had
+
+Two stores packed side by side each want the column of the service above them, and considered
+once in order the first is blocked by the second, which has not moved yet. A single pass left
+the session cache where it started. Alignment now iterates to a fixed point, and a test
+asserts both stores land in distinct correct cells rather than only checking one.
+
+### Verification
+
+| Command | Outcome |
+| --- | --- |
+| `pnpm check` | build + typecheck clean; **544 tests in 37 files passed** (530 after slice 2) |
+| render comparison, 20 examples + pockito png/svg/manifest | only `showcase/trust-zones.png` changed; inspected and regenerated |
+| `pnpm benchmark:generalization` | 21 failures — **identical case list to baseline** |
+| load-bearing check | disabling alignment fails 2 tests, including the end-to-end showcase assertion |
+
+**Changed:** `layout/src/spine.ts` (`anchors`), `layout/src/orchestrate.ts`,
+`layout-elk/src/ordering.ts` (`alignToAnchors`), `banded.ts`, `composition.ts`.
+**Tests:** `layout/test/spine.test.ts` (+6), `layout-elk/test/ordering.test.ts` (+7),
+`sdk/test/progression.test.ts` (+1).
+
+---
+
+## Human visual audit of the trust-zone render (2026-09-20)
+
+A reviewer supplied a written audit of the slice-2 render at `.tmp/audit/`. **That path is
+gitignored, so the findings are recorded here to survive.** This is review *evidence*, not a
+parity verdict: no record was added to `benchmarks/reference-reviews.json`, reference parity
+stays **0/6 `unreviewed`**, and only the reviewer may change that.
+
+Its headline judgement: the output reads as *an automatically laid-out architecture diagram
+rather than a deliberately composed technical graphic*, and the fix is a better semantic
+intermediate representation rather than more decoration. It named the composition order the
+engine should use — **narrative first, semantic groups second, branches third, components
+last** — which is the T16 thesis arrived at independently.
+
+It also independently prescribed slice 3: *"Session Cache directly below the component that
+owns the session interaction; Context Store directly below the component that owns context
+access."* That is now implemented and asserted.
+
+### Findings mapped to tasks
+
+| Severity | Finding | Owner |
+| --- | --- | --- |
+| High | One accent colour carries two meanings: the `External dependency` flow also connects internal components (`remote-api`, `remote-cluster`) inside the GCP zone | **New** — needs an edge-scope check; the example is mis-authored *and* nothing detects it |
+| High | Dependency routing is ambiguous — shared purple trunks and T-junctions, reader must trace wires | T18 (junctions, intentional sharing vs accidental coincidence) |
+| High | The balancer's two branches (`/app/*` vs `/api/*`) are not self-evident | T18 (portal reservation), T19 (label placement) |
+| High | Arrowheads too weak; long connectors read as bidirectional | T18 |
+| Med-High | Boundary semantics underspecified — five boundaries, no boundary legend, no distinction between trust/deployment/logical | **New** — boundary kinds are a schema/design-system gap |
+| Med-High | "Four trust zones" not self-evident; five boundary-like regions are drawn | Same as above |
+| Med-High | Canvas space used inefficiently — dead band below, wide gap between GCP and FDC | T19 (full-page fitting); partially T17 |
+| Med-High | Primary path still changes vertical level more than necessary | T16 residual / T19 candidates |
+| Med-High | Secondary routes cross the primary application area | T18 |
+| Medium | Too many small floating labels, some detached from their edge | T19 |
+| Medium | Typography too small for embedded viewing | T19 (chrome-aware medium fitting); `Medium`/`fitToMedium` exist but no minimum-size policy per role |
+| Medium | Agent Core's emphasis reads as a UI selection state | T13 residual / design system |
+| Medium | Component forms too uniform — type conveyed only by icon | T07 silhouettes exist but are not differentiated by kind |
+| Medium | `CARD_CORE` uses a database icon though the name suggests a service | Example data; unverifiable from the image |
+| Medium | One-way arrows on state access may overspecify read/write | T21+ semantics |
+| Low-Med | The annotation reads as another component | Renderer / design system |
+| Low-Med | Legend sits far from the content | T19 |
+| Low-Med | Step badges crowd component icons | T01 residual |
+| Low-Med | Stroke hierarchy unstable — too many coexisting edge weights | Design system |
+
+**Two findings have no owning task yet** (edge-scope consistency, boundary semantic kinds).
+Both are representation gaps rather than layout bugs, which matches the audit's own
+conclusion. They are recorded here and need a contract decision before implementation — per
+the working rules, that means updating the owning contract and `DECISIONS.md`, not quietly
+adding a feature.
+
+### What the audit confirms is already working
+
+Narrative title and subtitle, numbered request flow, an explicit primary spine, zone
+grouping, protocol labels, primary/secondary distinction, replica counts, component icons,
+restrained colour, a legend, and annotation capability.
+
+---
+
+**Outstanding human gate: reference parity 0/6 `unreviewed`.** `ref-03-trust-zones` maps to
+this exact showcase, so its candidate hash moved with slices 2 and 3. Hashes for a record are
+printed by `pnpm benchmark:references` into `.tmp/reference-benchmark/report.json`. No
+approval is claimed or implied by the audit above — read against the seven-dimension rubric
+it reads closer to a rejection, and a `rejected` record would be more useful than none.
+
+**Next ready task: T17** (correspondence, wrapping, overview/detail; depends on T15, T11).

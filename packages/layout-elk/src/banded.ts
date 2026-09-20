@@ -7,7 +7,7 @@ import type {
   MeasuredNode,
   MeasuredView,
 } from "@topoir/core";
-import { compareForReading, ordersAlongReading, rankForReading, spinePositions, type OrderingHints } from "./ordering.js";
+import { alignToAnchors, compareForReading, ordersAlongReading, rankForReading, spinePositions, type OrderingHints } from "./ordering.js";
 
 /**
  * Compiler-owned banded composition.
@@ -73,6 +73,7 @@ export interface BandedSpacing {
 export function banded(view: MeasuredView, spacing: BandedSpacing, hints: OrderingHints = {}): GeometryView {
   const excludeFromOrdering = hints.excludeFromOrdering ?? new Set<string>();
   const spineIndex = spinePositions(hints.spine);
+  const anchors = hints.anchors ?? new Map<string, string>();
   const horizontal = view.layout.direction === "right" || view.layout.direction === "left";
   const groupsByParent = new Map<string | undefined, MeasuredGroup[]>();
   for (const group of view.groups) {
@@ -98,7 +99,7 @@ export function banded(view: MeasuredView, spacing: BandedSpacing, hints: Orderi
       ...(nodesByGroup.get(groupId) ?? []).map((node) => ({ id: node.id, width: node.width, height: node.height, order: node.order, members: [node.id], node })),
     ];
     const mode = group?.layout.mode ?? "layered";
-    const placements = arrange(items, view, spacing, horizontal, mode, group, excludeFromOrdering, spineIndex);
+    const placements = arrange(items, view, spacing, horizontal, mode, group, excludeFromOrdering, spineIndex, anchors);
     const contentWidth = Math.max(0, ...placements.map((placement) => placement.dx + placement.item.width));
     const contentHeight = Math.max(0, ...placements.map((placement) => placement.dy + placement.item.height));
     if (group === undefined) return { width: contentWidth, height: contentHeight, placements };
@@ -155,6 +156,7 @@ function arrange(
   group: MeasuredGroup | undefined,
   excludeFromOrdering: ReadonlySet<string> = new Set(),
   spineIndex: ReadonlyMap<string, number> = new Map(),
+  anchors: ReadonlyMap<string, string> = new Map(),
 ): Placement[] {
   if (items.length === 0) return [];
   const gap = group?.layout.gap ?? spacing.node;
@@ -188,17 +190,23 @@ function arrange(
   if (mode === "grid" || mode === "pack") {
     const columns = Math.max(1, group?.layout.columns ?? Math.ceil(Math.sqrt(items.length)));
     const ordered = [...items].sort(compareItems);
-    const columnWidths = Array.from({ length: columns }, (_, column) =>
-      Math.max(0, ...ordered.filter((_, index) => index % columns === column).map((item) => item.width)),
+    // Sequential packing first, then supporting siblings slide under whatever they hang
+    // off. A session cache belongs below the service that writes to it; packed by index it
+    // lands below whichever sibling happens to share its column, and the reader has to
+    // trace a connector to find out whose state it is.
+    const cell = alignToAnchors(ordered, columns, anchors, (item) => item.block === undefined);
+    const usedColumns = Math.max(1, ...cell.map((slot) => slot.column + 1));
+    const columnWidths = Array.from({ length: usedColumns }, (_, column) =>
+      Math.max(0, ...ordered.filter((_, index) => cell[index]!.column === column).map((item) => item.width)),
     );
-    const rows = Math.ceil(ordered.length / columns);
-    const rowHeights = Array.from({ length: rows }, (_, row) =>
-      Math.max(0, ...ordered.slice(row * columns, (row + 1) * columns).map((item) => item.height)),
+    const usedRows = Math.max(1, ...cell.map((slot) => slot.row + 1));
+    const rowHeights = Array.from({ length: usedRows }, (_, row) =>
+      Math.max(0, ...ordered.filter((_, index) => cell[index]!.row === row).map((item) => item.height)),
     );
     return ordered.map((item, index) => ({
       item,
-      dx: columnWidths.slice(0, index % columns).reduce((sum, value) => sum + value + gap, 0),
-      dy: rowHeights.slice(0, Math.floor(index / columns)).reduce((sum, value) => sum + value + gap, 0),
+      dx: columnWidths.slice(0, cell[index]!.column).reduce((sum, value) => sum + value + gap, 0),
+      dy: rowHeights.slice(0, cell[index]!.row).reduce((sum, value) => sum + value + gap, 0),
     }));
   }
 
