@@ -220,6 +220,19 @@ interface Piece {
   readonly continues: boolean;
 }
 
+/**
+ * An over-long token split after each separator, keeping the separator with the text
+ * before it.
+ *
+ * `trace-apply-sdsu-34w_yyyy-MM-dd-HH` becomes `trace-`, `apply-`, `sdsu-`, `34w_`, … so a
+ * line can end at a boundary a reader recognises. A token with no separator comes back
+ * whole and the caller falls back to graphemes.
+ */
+function splitAtSeparators(word: string): string[] {
+  const parts = word.split(/(?<=[_\-./:@+])/u).filter(Boolean);
+  return parts.length > 1 ? parts : [word];
+}
+
 export function layoutText(
   text: string,
   maxWidth: number,
@@ -239,15 +252,38 @@ export function layoutText(
     const pieces = words.flatMap((word): Piece[] => {
       if (measurer.measure(word, style).width <= maxWidth) return [{ text: word, continues: false }];
       const chunks: Piece[] = [];
+      const push = (text: string): void => {
+        chunks.push({ text, continues: chunks.length > 0 });
+      };
+      // An identifier breaks at its own separators before it breaks anywhere else.
+      // `RC_LoggingSystem_UserTrace_Encryption` came out as "RC_LoggingSystem_UserTr" /
+      // "ace_Encryption", which splits a word in the middle and is markedly harder to read
+      // than the same text broken after an underscore. Graphemes remain the fallback for a
+      // run with no separator in it at all.
       let chunk = "";
-      for (const { segment } of new Intl.Segmenter("en", { granularity: "grapheme" }).segment(word)) {
-        if (chunk && measurer.measure(chunk + segment, style).width > maxWidth) {
-          chunks.push({ text: chunk, continues: chunks.length > 0 });
+      for (const part of splitAtSeparators(word)) {
+        if (chunk && measurer.measure(chunk + part, style).width > maxWidth) {
+          push(chunk);
           chunk = "";
         }
-        chunk += segment;
+        if (measurer.measure(part, style).width > maxWidth) {
+          // This one piece has no usable break of its own.
+          if (chunk) {
+            push(chunk);
+            chunk = "";
+          }
+          for (const { segment } of new Intl.Segmenter("en", { granularity: "grapheme" }).segment(part)) {
+            if (chunk && measurer.measure(chunk + segment, style).width > maxWidth) {
+              push(chunk);
+              chunk = "";
+            }
+            chunk += segment;
+          }
+          continue;
+        }
+        chunk += part;
       }
-      if (chunk) chunks.push({ text: chunk, continues: chunks.length > 0 });
+      if (chunk) push(chunk);
       return chunks;
     });
     for (const piece of pieces) {

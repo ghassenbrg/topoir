@@ -1,0 +1,72 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: exple1-repro
+  title: User trace encryption pipeline
+  description: Reproduction fixture for reference exple1 — producers, Kafka topics, consumers, trace files and Splunk.
+model:
+  groups:
+    - { id: enavi-prd, kind: cloud, label: GCP - rcard-e-navi-prd, order: 0, layout: { mode: column, gap: 80 } }
+    - { id: apply-prd, kind: cloud, label: GCP - rcard-apply-prd, order: 1, layout: { mode: column } }
+    - { id: confluent, kind: cloud, label: GCP - Confluent Cloud, order: 2, layout: { mode: column } }
+    - { id: streaming-prd, kind: cloud, label: GCP - rcard-streaming-prd, order: 3, layout: { mode: column } }
+    - { id: streaming-vm, kind: vpc, label: VM, parent: streaming-prd, order: 0, layout: { mode: column } }
+    - { id: fdc, kind: zone, label: FDC, order: 4, layout: { mode: grid, columns: 2, gap: 72 } }
+    - { id: fdc-vm, kind: vpc, label: 'VM: APSUAP0006-0007', parent: fdc, order: 2, layout: { mode: grid, columns: 3, gap: 64 } }
+    - { id: splunk, kind: logical, label: SPLUNK, parent: fdc, order: 3, layout: { mode: row, gap: 56 } }
+  nodes:
+    - { id: e-navi, kind: service, label: e-navi, group: enavi-prd, order: 0, visual: { shape: stack } }
+    - { id: e-navi-api, kind: service, label: e-navi-api, group: enavi-prd, order: 1, visual: { shape: stack } }
+    - { id: card-apply, kind: service, label: card-apply, group: apply-prd, order: 0, visual: { shape: stack } }
+
+    - { id: topic-logging, kind: queue, label: RC_LoggingSystem_UserTrace_Encryption, description: Topic, group: confluent, order: 0 }
+    - { id: topic-member-enc, kind: queue, label: RC_MemberSystem_UserTrace_Encryption, description: Topic, group: fdc, order: 0 }
+    - { id: topic-member-raw, kind: queue, label: RC_MemberSystem_UserTrace_Raw, description: Topic, group: fdc, order: 1 }
+
+    - { id: linkage-consumer, kind: worker, label: card-tracedata-linkage-consumer, group: streaming-vm, order: 0 }
+    - { id: filestore-consumer, kind: worker, label: card-tracedata-filestore-consumer, group: fdc-vm, order: 0 }
+    - { id: decryption-consumer, kind: worker, label: card-usertrace-decryption-consumer, group: fdc-vm, order: 1 }
+
+    - { id: trace-enavi-api, kind: filesystem, label: trace-e-navi-api-s23u-3as_yyyy-MM-dd-HH, group: fdc-vm, order: 2 }
+    - { id: trace-enavi, kind: filesystem, label: trace-e-navi-s8feu-343f_yyyy-MM-dd-HH, group: fdc-vm, order: 3 }
+    - { id: trace-apply, kind: filesystem, label: trace-apply-sdsu-34w_yyyy-MM-dd-HH, group: fdc-vm, order: 4 }
+
+    - { id: forwarder-a, kind: service, label: Splunk Forwarder, group: fdc-vm, order: 5 }
+    - { id: forwarder-b, kind: service, label: Splunk Forwarder, group: fdc-vm, order: 6 }
+
+    - { id: splunk-enavi, kind: object-storage, label: confidential_e-navi, group: splunk, order: 0 }
+    - { id: splunk-apply, kind: object-storage, label: confidential_card-apply, group: splunk, order: 1 }
+  flows:
+    - { id: produce, label: Producer, color: '#6D28D9', style: dashed }
+    - { id: consume, label: Consumer, color: '#15803D', style: dashed }
+    - { id: files, label: Trace files, color: '#111827', style: dashed }
+  edges:
+    - { id: p1, from: e-navi, to: topic-logging, kind: publish, flow: produce }
+    - { id: p2, from: e-navi-api, to: topic-logging, kind: publish, flow: produce }
+    - { id: p3, from: card-apply, to: topic-logging, kind: publish, flow: produce }
+    - { id: c1, from: linkage-consumer, to: topic-logging, kind: consume, flow: consume }
+    - { id: p4, from: linkage-consumer, to: topic-member-enc, kind: publish, flow: produce }
+    - { id: p5, from: linkage-consumer, to: topic-member-raw, kind: publish, flow: produce }
+    - { id: c2, from: filestore-consumer, to: topic-member-enc, kind: consume, flow: consume }
+    - { id: c3, from: decryption-consumer, to: topic-member-raw, kind: consume, flow: consume }
+    - { id: c4, from: decryption-consumer, to: topic-member-enc, kind: consume, flow: consume }
+    - { id: f1, from: filestore-consumer, to: trace-enavi-api, kind: write, flow: files }
+    - { id: f2, from: filestore-consumer, to: trace-enavi, kind: write, flow: files }
+    - { id: f3, from: decryption-consumer, to: trace-apply, kind: write, flow: files }
+    - { id: g1, from: trace-enavi-api, to: forwarder-a, kind: read, flow: files }
+    - { id: g2, from: trace-enavi, to: forwarder-a, kind: read, flow: files }
+    - { id: g3, from: trace-apply, to: forwarder-b, kind: read, flow: files }
+    - { id: s1, from: forwarder-a, to: splunk-enavi, label: trace-e-navi-api-*, kind: write, flow: files }
+    - { id: s2, from: forwarder-b, to: splunk-apply, label: trace-apply-*, kind: write, flow: files }
+  annotations:
+    - { id: cid-note, kind: note, text: 'Each message header contains CID = pod_name of the producing app.', anchor: topic-logging }
+    - { id: filename-note, kind: note, text: 'The log filename is derived from the pod-name ID stored in the Kafka message header.', anchor: filestore-consumer }
+views:
+  - id: overview
+    theme: technical-clean
+    showLegend: true
+    layout: { direction: right, spacing: normal, aspectRatio: 1.8 }
+    design:
+      composition: architecture-map
+      audience: engineering
+      takeaway: Producers publish user traces to Kafka; consumers decrypt them to files that Splunk forwarders ship on.

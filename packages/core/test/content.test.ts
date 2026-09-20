@@ -172,3 +172,54 @@ describe("measured node content", () => {
     expect(report.metrics.omittedGraphemes).toBe(0);
   });
 });
+
+describe("an over-long identifier breaks where a reader expects", () => {
+  /**
+   * `RC_LoggingSystem_UserTrace_Encryption` came out as "RC_LoggingSystem_UserTr" /
+   * "ace_Encryption": a word split down the middle, which is markedly harder to read than
+   * the same text broken after a separator. Found by reproducing a reference diagram, whose
+   * own rendering breaks these identifiers exactly where this now does.
+   */
+  const style: TextStyle = { fontFamily: "Inter", fontSize: 14, fontWeight: 600, lineHeight: 1.3 };
+  const measurer = bundledFontTextMeasurer();
+
+  it("breaks an underscore identifier after an underscore", () => {
+    const { lines } = layoutText("RC_LoggingSystem_UserTrace_Encryption", 170, style, measurer, 4);
+    expect(lines.length).toBeGreaterThan(1);
+    for (const line of lines.slice(0, -1)) expect(line, line).toMatch(/[_\-./:@+]$/u);
+  });
+
+  it("breaks a hyphenated identifier after a hyphen", () => {
+    const { lines } = layoutText("card-tracedata-filestore-consumer", 150, style, measurer, 4);
+    expect(lines.length).toBeGreaterThan(1);
+    for (const line of lines.slice(0, -1)) expect(line, line).toMatch(/-$/u);
+  });
+
+  it("still breaks a run with no separator at all", () => {
+    // Graphemes remain the fallback; a token with nothing to break on must still fit.
+    const { lines } = layoutText("A".repeat(120), 120, style, measurer, 4);
+    expect(lines.length).toBeGreaterThan(1);
+    for (const line of lines) expect(measurer.measure(line, style).width).toBeLessThanOrEqual(120);
+  });
+
+  it("loses no characters when it breaks", () => {
+    const source = "trace-e-navi-api-s23u-3as_yyyy-MM-dd-HH";
+    const { lines, disposition } = layoutText(source, 200, style, measurer, 4);
+    expect(disposition).toBe("rendered");
+    expect(lines.join("")).toBe(source);
+  });
+
+  it("keeps every line inside the width it was given", () => {
+    for (const text of ["RC_MemberSystem_UserTrace_Encryption", "card-usertrace-decryption-consumer", "a/b/c/d/e/f/g/h/i/j/k/l/m/n"]) {
+      for (const line of layoutText(text, 140, style, measurer, 6).lines) {
+        expect(measurer.measure(line, style).width, `${text} -> ${line}`).toBeLessThanOrEqual(140);
+      }
+    }
+  });
+
+  it("does not insert a space where it broke a word", () => {
+    // The pieces of one word are rejoined without a separator; a space would change the id.
+    const { lines } = layoutText("card-tracedata-linkage-consumer", 150, style, measurer, 4);
+    expect(lines.join("")).toBe("card-tracedata-linkage-consumer");
+  });
+});

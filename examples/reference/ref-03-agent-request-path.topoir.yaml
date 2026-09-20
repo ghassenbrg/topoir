@@ -1,0 +1,73 @@
+apiVersion: topoir.dev/v1alpha1
+kind: Architecture
+metadata:
+  name: exple3-repro
+  title: AI agent request path
+  description: Reproduction fixture for reference exple3 — four trust zones, one request spine, state and external branches.
+model:
+  groups:
+    - { id: internet, kind: external-zone, label: Internet Zone, order: 0, layout: { mode: column, gap: 60 } }
+    - { id: gcp, kind: cloud, label: GCP Zone, order: 1, layout: { mode: grid, columns: 3, gap: 72 } }
+    - { id: agent-app, kind: logical, label: Agent application, parent: gcp, order: 1, layout: { mode: grid, columns: 3, gap: 64 } }
+    - { id: fdc, kind: zone, label: FDC Zone, order: 2, layout: { mode: row, gap: 96 } }
+    - { id: external, kind: external-zone, label: External Locations, order: 3, layout: { mode: row } }
+  nodes:
+    - { id: mobile, kind: client, label: Mobile client, description: /ai-agent/app?ottToken=xxxx&lg=en, group: internet, order: 0, visual: { asset: 'lucide:smartphone', shape: icon } }
+    - { id: akamai, kind: gateway, label: Akamai, group: internet, order: 1, visual: { asset: 'lucide:globe' } }
+
+    - id: edge-router
+      kind: load-balancer
+      label: Edge router
+      group: gcp
+      order: 0
+      ports:
+        - { id: app, label: /ai-agent/app/*, side: east, kind: output, order: 0 }
+        - { id: api, label: /ai-agent/api/*, side: east, kind: output, order: 1 }
+      visual: { asset: 'lucide:git-fork', portLabels: inside }
+
+    - { id: rcpai-webapp, kind: service, label: rcpai-webapp, group: agent-app, order: 0 }
+    - { id: rcpai-front, kind: service, label: rcpai-front, group: agent-app, order: 1 }
+    - { id: rcpai-core, kind: service, label: rcpai-core, group: agent-app, order: 2 }
+    - { id: card-agent-core, kind: service, label: card-agent-core, group: agent-app, order: 3, visual: { emphasis: primary } }
+    - { id: redis, kind: cache, label: redis, group: agent-app, order: 4, technology: redis, visual: { shape: cylinder } }
+    - { id: postgres, kind: database, label: PostgreSQL, group: agent-app, order: 5, technology: postgresql, visual: { shape: cylinder } }
+
+    - { id: yamecha-api, kind: api, label: yamecha-api, group: gcp, order: 2 }
+    - { id: cluster1, kind: kubernetes-service, label: Cluster 1, description: rcard-geneye-cluster-prd, group: gcp, order: 3 }
+
+    - { id: f5, kind: load-balancer, label: F5, group: fdc, order: 0, visual: { asset: 'lucide:shield-check', shape: icon } }
+    - { id: card-core, kind: database, label: CARD_CORE, group: fdc, order: 1, visual: { shape: cylinder } }
+    - { id: amaor, kind: external-system, label: AMAOR API, group: fdc, order: 2, visual: { shape: stack } }
+
+    - { id: rakuten, kind: external-system, label: Rakuten APIs, group: external, order: 0, visual: { shape: stack } }
+  flows:
+    - { id: request, label: Request path, color: '#111827', style: solid }
+    - { id: state, label: State access, color: '#64748B', style: dashed }
+  edges:
+    - { id: open, from: mobile, to: akamai, label: /ai-agent/*, kind: request, flow: request, emphasis: primary }
+    - { id: accelerate, from: akamai, to: edge-router, kind: request, flow: request, emphasis: primary }
+    - { id: to-webapp, from: edge-router, to: rcpai-webapp, sourcePort: app, kind: request, flow: request }
+    - { id: to-front, from: edge-router, to: rcpai-front, sourcePort: api, kind: request, flow: request, emphasis: primary }
+    - { id: invoke, from: rcpai-front, to: rcpai-core, kind: request, flow: request, emphasis: primary }
+    - { id: callback, from: rcpai-core, to: rcpai-front, kind: response, flow: request }
+    - { id: session, from: rcpai-front, to: redis, label: Session, kind: write, flow: state }
+    - { id: context, from: rcpai-core, to: postgres, label: Context, kind: write, flow: state }
+    - { id: yamecha, from: rcpai-core, to: yamecha-api, kind: request, flow: request }
+    - { id: to-cluster, from: rcpai-core, to: cluster1, kind: request, flow: request }
+    - { id: to-card-agent, from: rcpai-front, to: card-agent-core, kind: request, flow: request }
+    - { id: legacy, from: card-agent-core, to: f5, kind: request, flow: request, emphasis: primary }
+    - { id: legacy-db, from: f5, to: card-core, kind: write, flow: request }
+    - { id: amaor-call, from: card-agent-core, to: amaor, kind: request, flow: request }
+    - { id: rakuten-call, from: card-agent-core, to: rakuten, kind: request, flow: request }
+  annotations:
+    - { id: internal-note, kind: note, text: 'A cluster with the same components will serve as internal and will be accessed through the /agent/internal/* endpoint.', anchor: cluster1 }
+views:
+  - id: overview
+    theme: technical-clean
+    showLegend: true
+    layout: { direction: right, spacing: normal, aspectRatio: 2.2 }
+    design:
+      composition: architecture-map
+      audience: engineering
+      takeaway: One request path crosses each trust zone once; state and external calls stay secondary.
+      story: [open, accelerate, to-front, invoke, to-card-agent, legacy, legacy-db]

@@ -1681,3 +1681,87 @@ approval is claimed or implied by the audit above — read against the seven-dim
 it reads closer to a rejection, and a `rejected` record would be more useful than none.
 
 **Next ready task: T17** (correspondence, wrapping, overview/detail; depends on T15, T11).
+
+---
+
+## Reference reproduction exercise: exple1 and exple3 (2026-09-20)
+
+Asked to reproduce two reference screenshots with the tool. Both fixtures are committed as
+`examples/reference/ref-01-user-trace-pipeline.topoir.yaml` and
+`ref-03-agent-request-path.topoir.yaml`, authored coordinate-free from the references per
+`docs/visual-benchmark.md` — structure, names, nesting and flows, no hand-placed geometry.
+
+**Result: neither is a usable reproduction.** exple1 is structurally close and honestly
+rejected; exple3 is a visual mess that the tool reports as clean. Four findings, in order of
+how much they matter.
+
+### 1. The acceptance gate cannot see the worst output (most serious)
+
+The exple3 reproduction compiles to `accepted: true`, `valid: true`, **zero diagnostics**,
+4 edge crossings — and is plainly unreadable: three long trunks leave `card-agent-core`,
+wrap around the canvas and re-enter other zones, and the F5 connector appears to terminate
+beside the component rather than at it.
+
+Route detour was the obvious suspect and is **not** the cause; measured worst case is 2.03x
+with only 2 of 15 edges above 2x. So the defect is real, visible, and *not* captured by any
+counter the gate consults. Every quality property in the model can be satisfied by a picture
+no reader would accept. This is the compilation-success-versus-presentation-quality gap,
+demonstrated rather than asserted, and it means the current `accepted` flag overstates what
+has been verified. Nothing in the roadmap currently owns "readability the counters cannot
+see".
+
+### 2. `architecture-map` rejects endpoint ports outright
+
+The defining feature of exple3 — one router splitting `/ai-agent/app/*` from
+`/ai-agent/api/*` to two different services — cannot be drawn. Binding an edge to a port
+fails with `TOP402_COMPOSITION_PORT_UNSUPPORTED`, so the fixture had to drop the bindings and
+the two routes become indistinguishable lines. The same feature is central to ref-04
+(Pockito), whose three gateway routes are its main structure. This is honest (it errors
+rather than silently ignoring the binding) but it blocks two of six references. T18's
+attachment slice owns it.
+
+### 3. Cross-boundary continuation is unaligned — the cause of the tangle
+
+Placement is per-container and nothing relates the exit point of one region to the entry
+point of the next. In the reference, `card-agent-core` sits at the bottom of the application
+box with `f5` directly below it in the zone beneath, so the connector is short and straight.
+In the reproduction `f5` is at the far left of FDC while its source is mid-right of GCP, so
+`legacy` takes 6 bends and 1.73x detour. The same cause produces the two illegal boundary
+crossings in exple1, where consumers inside a nested VM reach a topic in the enclosing zone
+by leaving that zone and coming back. This is T16's remaining "mixed local orientation",
+deferred to T18.
+
+### 4. Component type is carried by the icon alone
+
+`nodeShape` only returns `cylinder` for a database under an `architectural` or `sketch`
+theme; under `technical-clean` every component is a card. The references distinguish
+cylinders, stacked sheets and logo marks at a glance. The shapes exist and work — the
+fixtures had to ask for them explicitly. This matches the audit's "component styling is too
+repetitive" finding.
+
+### Fixed in this session: long identifiers broke mid-word
+
+`RC_LoggingSystem_UserTrace_Encryption` rendered as `RC_LoggingSystem_UserTr` /
+`ace_Encryption`. An over-long token now breaks after its own separators (`_ - . / : @ +`)
+before falling back to graphemes, which is exactly where the reference breaks the same
+strings. `trace-e-navi-api-s23u-3as_` / `yyyy-MM-dd-HH` now matches the reference line for
+line.
+
+| Command | Outcome |
+| --- | --- |
+| `pnpm check` | **550 tests in 37 files passed** (544 before) |
+| render comparison | **no golden changed** — no shipped example contained a mid-token break |
+| `pnpm benchmark:generalization` | identical case list to baseline |
+| load-bearing check | reverting to grapheme-only breaking fails 2 tests |
+
+### What the exercise says about priority
+
+The roadmap order (T17 correspondence next) does not match what the references need. On this
+evidence the order should be **T18 attachments/portals** (unblocks two references), then the
+unowned readability gap in finding 1, then T17. Recorded here rather than acted on: changing
+milestone order is a roadmap decision, and `docs/design/09-roadmap.md` plus `DECISIONS.md`
+own it.
+
+**Reference parity remains 0/6 `unreviewed`.** These two reproductions are not candidates for
+approval; they are evidence of what is missing.
+
