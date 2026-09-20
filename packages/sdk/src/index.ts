@@ -286,6 +286,10 @@ export class TopoIRCompiler {
               constraints: presentation.plan.constraints,
               story: presentation.plan.story.length > 0 ? presentation.plan.story : (view.design?.story ?? []),
               requiredOrder: presentation.plan.constraints.filter((entry) => entry.type === "order" && entry.strength === "required").map((entry) => entry.items),
+              // The same medium acceptance is judged against, so the backend can rank its
+              // arrangements by whether the result would be readable at the size it is for
+              // rather than discovering that only after the gate has rejected it.
+              fit: { medium: presentation.plan.medium, baseTextSize: theme.font.labelSize },
             })
           : await layoutEngine.layout(measured);
       diagnostics.push(...layout.diagnostics);

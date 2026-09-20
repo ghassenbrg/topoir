@@ -143,6 +143,86 @@ export function ordersAlongReading(mode: string, horizontal: boolean): boolean {
   return false;
 }
 
+/** A grid position inside a container. */
+export interface Cell {
+  row: number;
+  column: number;
+}
+
+/**
+ * Grid cells, with loosely-attached siblings kept out of the band the path leaves through.
+ *
+ * Wrapping is what causes the damage. A container's column count is chosen for the
+ * components the author had in mind, and a sibling that does not fit opens a new row —
+ * which, when the primary path continues into a region *below* this container, is exactly
+ * the corridor the path has to cross to get there.
+ *
+ * On the agent-request map that is `Cluster 1`: an internal cluster hanging off the core
+ * service, packed into a second row of the GCP zone, directly beneath the boundary the
+ * request leaves the zone from. The connector to the gateway below could not go down, so it
+ * went left, down, right, down and left again — six bends and 1.73x the direct distance —
+ * and the anchored note followed the cluster into the same corridor.
+ *
+ * ## What may be moved, and what may not
+ *
+ * Not every sibling in that band is in the way, because some of them are *saying* something
+ * by being there. A session cache drawn directly below the service that writes to it is
+ * placed, not packed: the reader learns whose state it is from the alignment alone. Hoisting
+ * that beside the row would undo the rule that put it there.
+ *
+ * The distinction is whether the component it hangs off is a **sibling in this same
+ * container**. Then "below" is a relationship a reader can actually see, and it stays.
+ *
+ * `Cluster 1` fails that test. It hangs off a service nested inside a sibling *boundary*, so
+ * all its position ever said was "below the agent application" — which of the six components
+ * in there it belongs to is not recoverable from the picture either way. It buys nothing and
+ * it costs the corridor, so it moves beside the path's last row instead. The row gets wider
+ * rather than the container taller, which is also the shape a reader expects: supporting
+ * detail belongs at the margin of the story rather than across it.
+ *
+ * ## When the rule applies at all
+ *
+ * - the container holds part of the path — otherwise there is no corridor to protect;
+ * - the path *continues past* this container, so there really is an exit. A container
+ *   holding the end of the path has nothing to make room for;
+ * - the rows below hold no part of the path. A row the path itself runs through is not an
+ *   obstruction.
+ */
+export function packForReading<T extends Orderable>(
+  ordered: readonly T[],
+  columns: number,
+  spineIndex: ReadonlyMap<string, number>,
+  anchors: ReadonlyMap<string, string> = new Map(),
+): Cell[] {
+  const cell = ordered.map((_, index) => ({ row: Math.floor(index / columns), column: index % columns }));
+  if (spineIndex.size === 0) return cell;
+  const entries = ordered.map((item) => spineEntry(item, spineIndex));
+  const onPath = entries.map((entry) => Number.isFinite(entry));
+  if (!onPath.some(Boolean)) return cell;
+  // The path ends inside this container, so nothing has to leave it.
+  if (Math.max(...entries.filter((entry) => Number.isFinite(entry))) >= spineIndex.size - 1) return cell;
+  const lastPathRow = Math.max(...cell.map((slot, index) => (onPath[index] ? slot.row : -1)));
+  const siblingIds = new Set(ordered.map((item) => item.id));
+  const movable = (index: number): boolean => {
+    if (onPath[index]) return false;
+    const anchor = anchors.get(ordered[index]!.id);
+    // Held in place by a relationship the reader can see; see above.
+    return anchor === undefined || !siblingIds.has(anchor);
+  };
+  let column = columns;
+  for (const [index, slot] of cell.entries()) {
+    if (slot.row <= lastPathRow) continue;
+    // A row the path runs through is not in the way; leave everything from there down.
+    if (onPath[index]) return cell;
+  }
+  for (const [index, slot] of cell.entries()) {
+    if (slot.row <= lastPathRow || !movable(index)) continue;
+    cell[index] = { row: lastPathRow, column };
+    column += 1;
+  }
+  return cell;
+}
+
 /**
  * Grid cells, with supporting siblings moved under the sibling they hang off.
  *
@@ -153,11 +233,11 @@ export function ordersAlongReading(mode: string, horizontal: boolean): boolean {
  */
 export function alignToAnchors<T extends Orderable>(
   ordered: readonly T[],
-  columns: number,
+  packed: readonly Cell[],
   anchors: ReadonlyMap<string, string>,
   isLeaf: (item: T) => boolean,
-): { row: number; column: number }[] {
-  const cell = ordered.map((_, index) => ({ row: Math.floor(index / columns), column: index % columns }));
+): Cell[] {
+  const cell = packed.map((slot) => ({ ...slot }));
   // An item stands for every component drawn inside it, so a store anchored to a service
   // inside a sibling boundary still finds that boundary.
   const ownerItem = new Map<string, number>();

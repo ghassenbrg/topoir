@@ -58,6 +58,7 @@ export function compositionBackend(): LayoutBackend {
       // from layer assignment; it does not get to reorder siblings.
       const order = readingOrder(analysis);
       const result = await engine.layout(view, {
+        ...(request.fit === undefined ? {} : { fit: request.fit }),
         excludeFromOrdering: orderingExclusions(analysis),
         ...(order === undefined ? {} : { spine: order }),
         // Anchors are offered whatever the path's provenance: a write to a store is a

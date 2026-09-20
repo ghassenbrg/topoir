@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-20. This file is the live execution ledger for the design program.
 
-**Program state: in progress. M0, M1 and M2 complete. Next task: T17 (correspondence, wrapping, overview/detail). Current milestone: M3 (T16–T20).**
+**Program state: in progress. M0, M1 and M2 complete. Current task: T18 slice 3 (primary-path weighting), then T17. Current milestone: M3 (T16–T20).**
 
 The full review previously verified `bc64cf2`: 91 tests in 15 files passed; 240/240 synthetic cases compiled without hard geometry defects; 220/240 passed the selected defect counters; six reference candidates were deterministic with no approved parity recorded. These are historical baseline observations, not evidence that the tasks below are implemented. The design-writing task added documents/examples only.
 
@@ -28,7 +28,7 @@ Allowed task states: `not_started`, `in_progress`, `implemented_pending_gate`, `
 | T15 | M2 | complete | `@topoir/layout` orchestration with declared backend capabilities and constraint admission; `layout-elk` unchanged as an adapter. See session entry. |
 | T16 | M3 | implemented_pending_gate | Slices 1–3 land: spine analysis, feedback roles, impossible-order reporting, reading order across siblings, and supporting components anchored under their owner. All three acceptance criteria met and asserted (`packages/sdk/test/progression.test.ts`). **Gate: target-size visual review** — a human audit of the slice-2 render is recorded below with 19 findings; reference parity remains 0/6 `unreviewed`. Mixed local orientation deferred to T18. See session entries. |
 | T17 | M3 | not_started | |
-| T18 | M3 | not_started | |
+| T18 | M3 | in_progress | Slice 1: endpoint ports honoured in the panel families. Slice 2: region arrangement search (rows *and* columns, with stretching), the exit-corridor rule, and the medium threaded into the composition score so the search and the acceptance gate judge one thing. Trust-zone showcase 9 crossings to 3; both reproduction fixtures accepted, `ref-01` from 4 illegal boundary crossings to 0. See session entries.
 | T19 | M3 | not_started | |
 | T20 | M3 | not_started | |
 | T21 | M4 | not_started | |
@@ -1847,3 +1847,115 @@ Neither is a reproduction yet. **Reference parity remains 0/6 `unreviewed`.**
 between a spine exit and the region the path continues into. That is the blocker both
 reproductions now share, and it subsumes the reverted alignment.
 
+
+## T18 slice 2 — the shape of the whole map, and what the score can see (2026-09-20)
+
+Three changes that turned out to be one problem. The reproduction of reference `exple3` had
+a tangle nothing could remove: the connector from the agent core to the gateway below took
+six bends and 1.73x the direct distance, going left, down, right, down and left again.
+Slice 1 established that aligning the two endpoints does not help while the space between
+them is occupied. This is that space.
+
+### 1. The corridor: a loosely-attached sibling must not sit in the path's way out
+
+A container's column count is chosen for the components the author had in mind. A sibling
+that does not fit opens a new row — and when the path continues into a region *below*, that
+new row is exactly the band the path has to cross. On this content that sibling is
+`Cluster 1`, and the anchored note followed it into the same corridor.
+
+The rule is not "hoist whatever wrapped", because some of those siblings are *saying*
+something by being there. A session cache drawn directly below the service that writes to it
+is placed, not packed: the alignment is how the reader learns whose state it is, and T16
+slice 3 exists to put it there. The first version of this rule hoisted those too and took
+the trust-zone showcase from accepted to rejected.
+
+The distinction that holds: whether the component it hangs off is **a sibling in this same
+container**. Then "below" is a relationship a reader can see, and it stays. `Cluster 1`
+hangs off a service nested inside a sibling *boundary*, so its position only ever said
+"below the agent application" — which of the six components in there owns it was never
+recoverable from the picture. It buys nothing and costs the corridor, so it moves beside.
+
+### 2. Two region shapes, chosen by measurement instead of by decree
+
+The root arrangement had been rewritten once already: regions were a lead region beside a
+stack, and became rows, because a stack puts the deepest component of the biggest region at
+maximum x and the next step is a long journey back to the left. But rows have the mirror
+defect — two regions in the same band read as parallel, and a path leaving one for the other
+crosses the whole band. **Neither is a default.** Both are now enumerated and the caller lays
+each out and keeps the one that measures better.
+
+A column arrangement also stretches: every region in a column takes the column's width, so
+their edges line up into one channel, and a column holding a single region takes the full
+height, so a lead region reads as the margin the composition sits beside. Stretching only
+ever adds room, so nothing inside a region can be squeezed by it.
+
+Ranking is by shape, which is cheap; it decides only which candidates are worth a full
+layout. Five are laid out in full.
+
+### 3. The score now sees the medium
+
+Those two changes made the trust-zone showcase *worse* in a way no counter could explain: 9
+edge crossings down to 2, and **rejected**. A wider arrangement wins on crossings and is
+scaled down harder to reach the page; past a point the text falls under the medium's own
+minimum and the drawing is one nobody can read. Acceptance has always known this. The
+search did not, so it could prefer an arrangement, lose at the gate, and never be told why.
+
+`LayoutRequest` now carries the medium and the base text size, and the composition score
+carries a fit term with a genuine cliff in it: below the minimum text size costs 5e5, more
+than any number of crossings and less than a dropped element, which is a lie rather than a
+legibility cost. Above it, a gentle preference for a drawing that needs less shrinking.
+
+The drawing measured is the geometry, which is smaller than the finished scene — title,
+legend and attribution are added later — so the scaling computed is optimistic in absolute
+terms. It is still the right comparison: that chrome is the same for every candidate of the
+same view, so the term ranks candidates rather than deciding acceptance. This is recorded
+because it is an approximation, not because it is a problem.
+
+### Measured outcome
+
+| | before | after |
+| --- | --- | --- |
+| trust-zone showcase | accepted, **9** crossings, 2100x1140 | accepted, **3** crossings, 2023x993 |
+| `ref-03` reproduction | accepted, **4** crossings, `legacy` 1.73x/6 bends | accepted, **1** crossing, `legacy` 1.54x/5 bends |
+| `ref-01` reproduction | **rejected**, 4 illegal boundary crossings, 8 crossings | **accepted**, **0** illegal, 3 crossings |
+| reference benchmark `ref-03` | 13 visible crossings | 3 crossings, 0 coincident, aspect within 3% |
+
+The `ref-01` result is the clearest: the arrangement search found the column shape on its
+own, stacked the Confluent, streaming and FDC zones into one channel beside the producer
+column, and the two connectors that had been leaving a nested VM to reach a topic in the
+enclosing zone stopped crossing a boundary they had no business crossing.
+
+### Verification
+
+| Command | Outcome |
+| --- | --- |
+| `pnpm check` | **566 tests in 37 files passed** (553 before) |
+| render comparison | **one golden changed**: `showcase/trust-zones.png`, regenerated after inspecting it |
+| `pnpm benchmark:generalization` | **identical 21-case failure list**; totals within noise — edge crossings 10525 to 10569 across 239 diagrams (+0.4%), one fewer near-empty canvas, elapsed 237.0s to 242.5s |
+| `pnpm benchmark:references` | six candidates deterministic, geometry clean; `ref-03` 13 crossings to 3 |
+| load-bearing check | disabling the corridor rule fails 3 tests; dropping the column arrangements fails 3; removing the stretching fails 2; zeroing the fit term fails 1 |
+
+**Changed:** `layout-elk/src/{composition,ordering,banded,index}.ts`, `layout/src/{backend,orchestrate}.ts`, `sdk/src/index.ts`, `benchmarks/reference-cases.json` (recorded gaps for `ref-03` were stale).
+**Tests:** `layout-elk/test/ordering.test.ts` (+11), `sdk/test/progression.test.ts` (+1, and one assertion replaced).
+
+### One test assertion was replaced, not relaxed
+
+`progression.test.ts` capped backward steps along the story at one. That cap was a proxy for
+"reads like prose rather than a zigzag", written when this content sat in two rows; it
+counted wraps instead of checking where they landed, so it called a legitimate third row a
+zigzag. It is replaced by the property it stood for: the path meets rows in order, never
+returns to one it has left, and the number of distinct rows equals the number of runs. The
+picture that broke the cap is better on every axis the cap was standing in for.
+
+### State of the two reproductions
+
+Both compile, both are accepted, and both are now recognisably the reference's composition
+rather than a differently-shaped diagram with the same content. Neither is a reproduction.
+**Reference parity remains 0/6 `unreviewed`** — only a person may record one.
+
+**Next: weight the primary path in the score.** The remaining `legacy` detour is not a
+defect any counter weighs properly: a bend on the spine costs a reader far more than a bend
+on a supporting connector, and the score currently charges them the same 8 points. The
+column arrangement that would put the FDC zone directly below the GCP zone — which is what
+the reference does — is rank 2 by shape and loses by roughly the aspect penalty. Making the
+spine's own straightness a term is the honest way to let it win when it deserves to.

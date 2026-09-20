@@ -1,4 +1,4 @@
-import type { CompiledConstraint, GeometryView, LayoutResult, MeasuredView } from "@topoir/core";
+import type { CompiledConstraint, GeometryView, LayoutResult, MeasuredView, Medium } from "@topoir/core";
 import type { Diagnostic } from "@topoir/schema";
 
 /**
@@ -46,6 +46,23 @@ export interface LayoutRequest {
   readonly story?: readonly string[];
   /** Required orderings, checked for impossibility against the model's own cycles. */
   readonly requiredOrder?: readonly (readonly string[])[];
+  /**
+   * The medium the drawing is for, and the text size it starts from.
+   *
+   * A backend that chooses between arrangements needs this, because "better" is not a
+   * property of a drawing on its own. A wider arrangement with fewer crossings can still be
+   * the worse one: it is scaled down harder to reach the page, and past a point the text
+   * stops being readable at the size it is actually for. Acceptance has always known that;
+   * without this the backend did not, and could hand back a layout that scored well on
+   * every counter it could see and was then rejected for a reason it was never told about.
+   */
+  readonly fit?: FitTarget;
+}
+
+/** What a drawing has to fit into, for a backend that is choosing between arrangements. */
+export interface FitTarget {
+  readonly medium: Medium;
+  readonly baseTextSize: number;
 }
 
 export interface AdmissionResult {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { loadDocument, measureView, projectView, resolveTheme, type MeasuredView } from "@topoir/core";
-import { bestRowSplit, CompositionEngine } from "../src/composition.js";
-import { alignToAnchors, compareForReading, orderForReading, ordersAlongReading, rankForReading, spineEntry, spinePositions } from "../src/ordering.js";
+import { bestRowSplit, CompositionEngine, regionArrangements } from "../src/composition.js";
+import { alignToAnchors, compareForReading, orderForReading, ordersAlongReading, packForReading, rankForReading, spineEntry, spinePositions } from "../src/ordering.js";
 
 /**
  * T16 slice 2 — reading order across siblings.
@@ -220,8 +220,10 @@ describe("the path only orders a sequence that runs the same way it does", () =>
 
 describe("supporting siblings slide under what they hang off", () => {
   const leaf = () => true;
+  const grid = (count: number, columns: number) =>
+    Array.from({ length: count }, (_, index) => ({ row: Math.floor(index / columns), column: index % columns }));
   const cells = (ids: readonly string[], columns: number, anchors: Record<string, string>) =>
-    alignToAnchors(ids.map((id) => item(id, [id])), columns, new Map(Object.entries(anchors)), leaf);
+    alignToAnchors(ids.map((id) => item(id, [id])), grid(ids.length, columns), new Map(Object.entries(anchors)), leaf);
 
   it("moves a store into the column of the service that writes to it", () => {
     // webapp frontend core / redis postgres -> redis under frontend, postgres under core.
@@ -259,7 +261,7 @@ describe("supporting siblings slide under what they hang off", () => {
 
   it("does not slide a boundary around", () => {
     const blocks = [item("a", ["a"]), item("zone", ["x"]), item("s", ["s"])];
-    const placed = alignToAnchors(blocks, 2, new Map([["zone", "a"], ["s", "a"]]), (entry) => entry.id !== "zone");
+    const placed = alignToAnchors(blocks, grid(blocks.length, 2), new Map([["zone", "a"], ["s", "a"]]), (entry) => entry.id !== "zone");
     expect(placed[1]).toEqual({ row: 0, column: 1 });
   });
 
@@ -268,5 +270,146 @@ describe("supporting siblings slide under what they hang off", () => {
     expect(placed).toEqual([
       { row: 0, column: 0 }, { row: 0, column: 1 }, { row: 1, column: 0 }, { row: 1, column: 1 },
     ]);
+  });
+});
+
+describe("the path's way out of a container stays clear", () => {
+  /**
+   * The corridor rule. A sibling that does not fit the declared column count opens a new
+   * row, and when the path continues into a region below, that new row is the band the path
+   * has to cross to get there. On the agent-request map that was `Cluster 1` sitting
+   * directly beneath the boundary the request leaves the GCP zone from: the connector could
+   * not go down, so it went left, down, right, down and left again.
+   */
+  const pack = (
+    ids: readonly string[],
+    columns: number,
+    spine: readonly string[],
+    anchors: Record<string, string> = {},
+    members: Record<string, readonly string[]> = {},
+  ) =>
+    packForReading(
+      ids.map((id) => item(id, members[id] ?? [id])),
+      columns,
+      spinePositions(spine),
+      new Map(Object.entries(anchors)),
+    );
+
+  it("moves a loosely-attached sibling beside the path instead of below it", () => {
+    // gcp: [edge-router, agent-app, yamecha-api] fill the row; cluster1 wrapped beneath the
+    // boundary the request leaves through. The path continues past this container (to f5).
+    const placed = pack(
+      ["edge-router", "agent-app", "yamecha-api", "cluster1"],
+      3,
+      ["edge-router", "front", "core", "f5"],
+      { cluster1: "core" },
+      { "agent-app": ["front", "core"] },
+    );
+    expect(placed[3], "the cluster belongs beside the row, not under the exit").toEqual({ row: 0, column: 3 });
+  });
+
+  it("leaves a store below the sibling that writes to it", () => {
+    /**
+     * The counter-case, and the reason the rule is not simply "hoist whatever wrapped".
+     * A session cache drawn directly below the service that writes to it is placed, not
+     * packed: the alignment is how the reader learns whose state it is. Its anchor is a
+     * sibling *in this container*, so "below" means something and it stays.
+     */
+    const placed = pack(
+      ["webapp", "frontend", "core", "redis", "postgres"],
+      3,
+      ["frontend", "core", "f5", "card-core"],
+      { redis: "frontend", postgres: "core" },
+    );
+    expect(placed[3]).toEqual({ row: 1, column: 0 });
+    expect(placed[4]).toEqual({ row: 1, column: 1 });
+  });
+
+  it("leaves everything alone when the path ends in this container", () => {
+    // Nothing has to leave, so there is no corridor to protect.
+    const placed = pack(["a", "b", "c", "d"], 3, ["a", "b", "c"]);
+    expect(placed[3]).toEqual({ row: 1, column: 0 });
+  });
+
+  it("leaves everything alone when the path runs through the row below", () => {
+    // A row the path itself runs through is not an obstruction.
+    const placed = pack(["a", "b", "c", "d"], 3, ["a", "d", "later"]);
+    expect(placed[3]).toEqual({ row: 1, column: 0 });
+  });
+
+  it("changes nothing for a container the path never enters", () => {
+    const placed = pack(["a", "b", "c", "d"], 3, ["x", "y", "z"]);
+    expect(placed).toEqual([
+      { row: 0, column: 0 }, { row: 0, column: 1 }, { row: 0, column: 2 }, { row: 1, column: 0 },
+    ]);
+  });
+
+  it("changes nothing when no path is known", () => {
+    const placed = pack(["a", "b", "c", "d"], 3, []);
+    expect(placed).toEqual([
+      { row: 0, column: 0 }, { row: 0, column: 1 }, { row: 0, column: 2 }, { row: 1, column: 0 },
+    ]);
+  });
+});
+
+describe("both region shapes are offered, and neither is a default", () => {
+  const box = (id: string, width: number, height: number) => ({ id, width, height });
+  const zones = [box("internet", 291, 317), box("gcp", 1549, 380), box("fdc", 758, 174), box("external", 241, 154)];
+  const plans = () => regionArrangements(zones, 120, 64, 2.2);
+  const find = (shape: "rows" | "columns") => plans().filter((plan) => plan.shape === shape);
+
+  it("offers a lead region standing beside a stack of the rest", () => {
+    /**
+     * The shape the request map actually wants: the client tier on the left, and the zones
+     * the path descends through in one channel beside it. Rows alone cannot express it, and
+     * a row that puts the next zone across the band from the last one makes the path cross
+     * the whole diagram to continue.
+     */
+    const stacked = find("columns").find((plan) => plan.cells.filter((cell) => cell.x === 0).length === 1);
+    expect(stacked, "a one-region lead column must be among the candidates").toBeDefined();
+    const tail = stacked!.cells.filter((cell) => cell.x > 0);
+    expect(tail.map((cell) => cell.block.id)).toEqual(["gcp", "fdc", "external"]);
+    // A stack, so each one starts below the last.
+    for (const [index, cell] of tail.slice(1).entries()) expect(cell.y).toBeGreaterThan(tail[index]!.y);
+  });
+
+  it("gives every region in a column the same width", () => {
+    // Ragged edges read as a pile; a common width reads as one channel.
+    const stacked = find("columns").find((plan) => plan.cells.filter((cell) => cell.x === 0).length === 1)!;
+    const tail = stacked.cells.filter((cell) => cell.x > 0);
+    expect(new Set(tail.map((cell) => cell.width)).size).toBe(1);
+    expect(tail[0]!.width).toBe(1549);
+    // Stretching only ever adds room, so nothing inside a region can be squeezed.
+    for (const cell of stacked.cells) expect(cell.width).toBeGreaterThanOrEqual(cell.block.width);
+  });
+
+  it("lets a lone lead region span the whole height", () => {
+    // It reads as the margin the composition sits beside, not a box that happens to be first.
+    const stacked = find("columns").find((plan) => plan.cells.filter((cell) => cell.x === 0).length === 1)!;
+    expect(stacked.cells[0]!.height).toBe(stacked.height);
+    expect(stacked.cells[0]!.height).toBeGreaterThan(stacked.cells[0]!.block.height);
+  });
+
+  it("still offers every row split", () => {
+    // The shapes that were there before are all still candidates; one more was added.
+    expect(find("rows").length).toBe(2 ** (zones.length - 1));
+  });
+
+  it("ranks by shape, closest to the requested proportion first", () => {
+    const ranked = plans();
+    for (const [index, plan] of ranked.slice(1).entries()) {
+      expect(plan.deviation).toBeGreaterThanOrEqual(ranked[index]!.deviation);
+    }
+  });
+
+  it("prefers a row arrangement when two shapes measure the same", () => {
+    /**
+     * A tie goes to the shape every existing diagram already had. The search tries the
+     * candidates in this order and keeps a later one only on a strict improvement, so a
+     * shape that is merely equal never displaces the one the author has been looking at.
+     */
+    const ranked = plans();
+    const tied = ranked.filter((plan) => Math.abs(plan.deviation - ranked[0]!.deviation) < 1e-9);
+    if (tied.length > 1) expect(tied[0]!.shape).toBe("rows");
   });
 });

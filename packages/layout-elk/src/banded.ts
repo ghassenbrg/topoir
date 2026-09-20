@@ -7,7 +7,7 @@ import type {
   MeasuredNode,
   MeasuredView,
 } from "@topoir/core";
-import { alignToAnchors, compareForReading, ordersAlongReading, rankForReading, spinePositions, type OrderingHints } from "./ordering.js";
+import { alignToAnchors, compareForReading, ordersAlongReading, packForReading, rankForReading, spinePositions, type OrderingHints } from "./ordering.js";
 
 /**
  * Compiler-owned banded composition.
@@ -194,7 +194,7 @@ function arrange(
     // off. A session cache belongs below the service that writes to it; packed by index it
     // lands below whichever sibling happens to share its column, and the reader has to
     // trace a connector to find out whose state it is.
-    const cell = alignToAnchors(ordered, columns, anchors, (item) => item.block === undefined);
+    const cell = alignToAnchors(ordered, packForReading(ordered, columns, spineIndex, anchors), anchors, (item) => item.block === undefined);
     const usedColumns = Math.max(1, ...cell.map((slot) => slot.column + 1));
     const columnWidths = Array.from({ length: usedColumns }, (_, column) =>
       Math.max(0, ...ordered.filter((_, index) => cell[index]!.column === column).map((item) => item.width)),

@@ -1,8 +1,29 @@
-import { analyzeGeometry, type QualityReport, type GeometryView, type GeometryNode, type GeometryGroup, type GeometryEdge, type GeometryPort, type GeometryAnnotation, type LayoutResult, type LayoutEngine, type MeasuredView, type Point, type Rect, type MeasuredNode } from "@topoir/core";
+import { analyzeGeometry, fitToMedium, type Medium, type QualityReport, type GeometryView, type GeometryNode, type GeometryGroup, type GeometryEdge, type GeometryPort, type GeometryAnnotation, type LayoutResult, type LayoutEngine, type MeasuredView, type Point, type Rect, type MeasuredNode } from "@topoir/core";
 import { ElkLayoutEngine } from "./index.js";
 import { obstacleRoute, segmentHitsRect } from "./routing.js";
 import { banded, portsFor, type BandedSpacing } from "./banded.js";
-import { alignToAnchors, orderForReading, ordersAlongReading, spinePositions, type OrderingHints } from "./ordering.js";
+import { alignToAnchors, orderForReading, ordersAlongReading, packForReading, spinePositions, type OrderingHints } from "./ordering.js";
+
+/** What a drawing has to fit into. Mirrors `FitTarget` in `@topoir/layout`. */
+export interface FitTarget {
+  readonly medium: Medium;
+  readonly baseTextSize: number;
+}
+
+/** Ordering hints, plus what the finished drawing has to fit into. */
+export interface CompositionHints extends OrderingHints {
+  readonly fit?: FitTarget;
+}
+
+/**
+ * How many region arrangements are laid out in full before the search stops.
+ *
+ * Each one costs a complete placement and routing pass per routing candidate, so this is
+ * the knob that decides how much the search costs. Three covers the shapes that are
+ * genuinely close to the requested aspect; beyond that the candidates are shapes the
+ * author did not ask for and the aspect penalty alone would sink them.
+ */
+const ARRANGEMENT_BUDGET = 5;
 
 /** Compiler-owned composition. Fixed candidate order is also the tie-break order. */
 export class CompositionEngine implements LayoutEngine {
@@ -13,7 +34,8 @@ export class CompositionEngine implements LayoutEngine {
    * and must not order the layout, and which components the primary path runs through.
    * Empty by default, so nothing changes for a caller that does not supply one.
    */
-  async layout(view: MeasuredView, hints: OrderingHints = {}): Promise<LayoutResult> {
+  async layout(view: MeasuredView, hints: CompositionHints = {}): Promise<LayoutResult> {
+    const fit = hints.fit;
     const kind = view.design?.composition ?? "topology";
     // A sequence draws lifelines rather than component faces, so there is nowhere for a
     // declared port to attach. The panel families have component faces like any other and
@@ -26,13 +48,26 @@ export class CompositionEngine implements LayoutEngine {
       // Lane distribution separates bundled connectors but costs bends, so let the score
       // decide rather than imposing it.
       const routings: [boolean, LaneOrder][] = [[true, "fan"], [true, "reach"], [false, "fan"]];
-      const evaluated = routings.map(([distributeLanes, laneOrder]) => {
-        const geometry = panels(view, kind, distributeLanes, laneOrder, hints);
-        return { geometry, score: compositionScore(view, geometry) };
-      });
-      evaluated.sort((left, right) => left.score - right.score);
-      const chosen = evaluated[0]!;
-      return { geometry: chosen.geometry, diagnostics: [], metrics: { candidatesEvaluated: evaluated.length, compositionScore: chosen.score } };
+      // Arrangement and routing are searched together, because the cost of an arrangement
+      // is almost entirely in the connectors it forces and those are not known until the
+      // routing is done. Ranking arrangements by shape alone is what bounds the search:
+      // only the closest few to the requested aspect are laid out at all.
+      let available = 1;
+      let chosen: { geometry: GeometryView; score: number } | undefined;
+      let evaluated = 0;
+      for (let arrangement = 0; arrangement < Math.min(available, ARRANGEMENT_BUDGET); arrangement += 1) {
+        for (const [distributeLanes, laneOrder] of routings) {
+          const result = panels(view, kind, distributeLanes, laneOrder, hints, arrangement);
+          available = result.arrangements;
+          const score = compositionScore(view, result.geometry, fit);
+          evaluated += 1;
+          // Strictly better only, so the first arrangement — the one closest to the shape
+          // the author asked for — keeps the result on a tie.
+          if (!chosen || score < chosen.score) chosen = { geometry: result.geometry, score };
+        }
+      }
+      if (!chosen) return { diagnostics: [{ code: "TOP400_LAYOUT_FAILED", severity: "error", message: "No composition candidate could be laid out." }] };
+      return { geometry: chosen.geometry, diagnostics: [], metrics: { candidatesEvaluated: evaluated, compositionScore: chosen.score } };
     }
     if (kind === "architecture") {
       // Compiler-owned composition: bands are chosen here, so the free parameters are how
@@ -76,7 +111,7 @@ export class CompositionEngine implements LayoutEngine {
           // One analysis per candidate. This used to run three times — once for the
           // score, once for the defect count and once for the early exit.
           const report = analyzeGeometry(view, geometry);
-          const score = scoreOf(report, geometry);
+          const score = scoreOf(report, geometry, fit);
           const defects = defectsOf(report);
           if (!best || defects < best.defects || (defects === best.defects && score < best.score)) {
             best = { geometry, score, defects };
@@ -99,7 +134,7 @@ export class CompositionEngine implements LayoutEngine {
       const result = await new ElkLayoutEngine({ seed, wrap }).layout({ ...view, layout: { ...view.layout, spacing } });
       if (!result.geometry) return result;
       const geometry = refineLabels(view, separateCoincidentRoutes(view, optimize ? refineRoutes(view, result.geometry) : result.geometry));
-      candidates.push({ result: { ...result, geometry }, score: compositionScore(view, geometry) });
+      candidates.push({ result: { ...result, geometry }, score: compositionScore(view, geometry, fit) });
       return { ...result, geometry };
     };
     for (const [seed, spacing] of (optimize ? [[1, view.layout.spacing], [7, "compact"], [19, "normal"]] : [[1, view.layout.spacing]]) as [number, MeasuredView["layout"]["spacing"]][]) {
@@ -170,8 +205,36 @@ function defectsOf({ metrics }: QualityReport): number {
   );
 }
 
-export function compositionScore(view: MeasuredView, geometry: GeometryView): number {
-  return scoreOf(analyzeGeometry(view, geometry), geometry);
+export function compositionScore(view: MeasuredView, geometry: GeometryView, fit?: FitTarget): number {
+  return scoreOf(analyzeGeometry(view, geometry), geometry, fit);
+}
+
+/**
+ * What it costs to have drawn something the medium cannot show at a readable size.
+ *
+ * There is a real cliff here and it is worth modelling as one. Scaling a drawing down to
+ * reach the page is ordinary and mildly undesirable; scaling it so far that the labels fall
+ * under the medium's own minimum is categorically different, because the result is a
+ * picture nobody can read. The acceptance gate already treats that as a failure. Until the
+ * score agreed, the search could prefer an arrangement that won on crossings, lose on the
+ * gate, and never be told why — which is exactly what a wider arrangement with fewer
+ * crossings did to the trust-zone map: 9 crossings down to 2, and text at 8.35px against a
+ * 9px minimum.
+ *
+ * The drawing measured here is the geometry, which is smaller than the finished scene — the
+ * title, the legend and the attribution are added afterwards. So the scaling computed here
+ * is optimistic in absolute terms. It is still the right comparison, because that chrome is
+ * the same for every candidate of the same view: the term ranks candidates, it does not
+ * decide acceptance.
+ */
+function fitPenalty(geometry: GeometryView, fit: FitTarget | undefined): number {
+  if (fit === undefined) return 0;
+  const { scale, legible } = fitToMedium({ width: geometry.bounds.width, height: geometry.bounds.height }, fit.medium, fit.baseTextSize);
+  // Below the medium's minimum text size: worse than any number of crossings, and cheaper
+  // than a dropped element, which is a lie rather than a legibility cost.
+  const unreadable = legible ? 0 : 5e5;
+  // Above that, a gentle preference for a drawing that needs less shrinking.
+  return unreadable + Math.max(0, 1 / Math.max(scale, 1e-6) - 1) * 600;
 }
 
 /**
@@ -179,14 +242,14 @@ export function compositionScore(view: MeasuredView, geometry: GeometryView): nu
  * crossing, so the scorer preferred a 9:1 ribbon nobody can read over a single crossing;
  * at 4000 a 3x miss costs about four crossings, which is the trade actually wanted.
  */
-function scoreOf(q: QualityReport, geometry: GeometryView): number {
+function scoreOf(q: QualityReport, geometry: GeometryView, fit?: FitTarget): number {
   const defects = q.diagnostics.filter((d) => d.severity === "error").length;
   let length = 0, bends = 0;
   for (const edge of geometry.edges) {
     bends += Math.max(0, edge.points.length - 2);
     for (let i = 1; i < edge.points.length; i++) length += distance(edge.points[i - 1]!, edge.points[i]!);
   }
-  return (q.metrics.droppedRelationships + q.metrics.droppedComponents + q.metrics.droppedLabels) * 1e12 + defects * 1e9 + (q.metrics.labelOverlaps + q.metrics.annotationOverlaps + q.metrics.groupTitleIntersections) * 1e6 + q.metrics.endpointBodyCrossings * 20000 + q.metrics.illegalBoundaryCrossings * 10000 + q.metrics.coincidentEdgeSegments * 3000 + q.metrics.edgeCrossings * 1000 + q.metrics.aspectDeviation * 4000 + bends * 8 + length * 0.015;
+  return (q.metrics.droppedRelationships + q.metrics.droppedComponents + q.metrics.droppedLabels) * 1e12 + defects * 1e9 + (q.metrics.labelOverlaps + q.metrics.annotationOverlaps + q.metrics.groupTitleIntersections) * 1e6 + q.metrics.endpointBodyCrossings * 20000 + q.metrics.illegalBoundaryCrossings * 10000 + q.metrics.coincidentEdgeSegments * 3000 + q.metrics.edgeCrossings * 1000 + q.metrics.aspectDeviation * 4000 + bends * 8 + length * 0.015 + fitPenalty(geometry, fit);
 }
 
 function sequence(view: MeasuredView): GeometryView {
@@ -222,7 +285,13 @@ function sequence(view: MeasuredView): GeometryView {
 
 interface Block { id: string; width: number; height: number; node?: MeasuredNode; children?: { block: Block; x: number; y: number }[]; parent?: string; order?: number | undefined; members: readonly string[] }
 
-function panels(view: MeasuredView, kind: "comparison" | "swimlanes" | "architecture-map", distributeLanes: boolean, laneOrder: LaneOrder, hints: OrderingHints = {}): GeometryView {
+/**
+ * @param arrangement which candidate arrangement of the top-level regions to use, clamped
+ * to the number available. Only `architecture-map` has more than one.
+ * @returns the geometry, and how many arrangements exist so the caller knows when to stop.
+ */
+function panels(view: MeasuredView, kind: "comparison" | "swimlanes" | "architecture-map", distributeLanes: boolean, laneOrder: LaneOrder, hints: OrderingHints = {}, arrangement = 0): { geometry: GeometryView; arrangements: number } {
+  let arrangementCount = 1;
   const spineIndex = spinePositions(hints.spine);
   const anchors = hints.anchors ?? new Map<string, string>();
   const horizontal = view.layout.direction === "right" || view.layout.direction === "left";
@@ -266,19 +335,16 @@ function panels(view: MeasuredView, kind: "comparison" | "swimlanes" | "architec
       const regions = blocks.filter((block) => block.node === undefined);
       const shared = blocks.filter((block) => block.node !== undefined);
       const pad = 24, gap = 64, columnGap = 120;
-      // Regions read in the order the primary path meets them, wrapped into rows.
-      //
-      // They used to be one lead region on the left with every other region stacked in a
-      // column beside it. That shape puts the deepest component of the largest region at
-      // maximum x, so the next step of the path — in the region below — is a long journey
-      // back to the left, and every connector leaving that component crowds one face of
-      // it. Rows in reading order keep each step near the last one.
-      const rows = bestRowSplit(regions.map((block) => block), columnGap, gap, view.layout.aspectRatio > 0 ? view.layout.aspectRatio : 1.6);
-      const rowWidth = (row: readonly Block[]): number =>
-        row.reduce((sum, block) => sum + block.width, 0) + Math.max(0, row.length - 1) * columnGap;
-      const rowHeight = (row: readonly Block[]): number => Math.max(0, ...row.map((block) => block.height));
-      const regionsWidth = Math.max(0, ...rows.map(rowWidth));
-      const regionsHeight = rows.reduce((sum, row) => sum + rowHeight(row), 0) + Math.max(0, rows.length - 1) * gap;
+      // Regions read in the order the primary path meets them. *How* they are arranged —
+      // wrapped into bands, or a lead region beside a stack — is not decided here: the
+      // candidates are enumerated and the caller lays each one out and keeps whichever
+      // measures better. Both shapes shipped as the default at some point and each was
+      // wrong for the other's content; see `regionArrangements`.
+      const options = regionArrangements(regions, columnGap, gap, view.layout.aspectRatio > 0 ? view.layout.aspectRatio : 1.6);
+      arrangementCount = Math.max(1, options.length);
+      const plan = options[Math.min(arrangement, options.length - 1)];
+      const regionsWidth = plan?.width ?? 0;
+      const regionsHeight = plan?.height ?? 0;
       const sharedWidth = shared.reduce((sum, block) => sum + block.width, 0) + Math.max(0, shared.length - 1) * gap;
       const width = Math.max(regionsWidth, sharedWidth) + pad * 2;
       const sharedHeight = Math.max(0, ...shared.map((block) => block.height));
@@ -286,17 +352,12 @@ function panels(view: MeasuredView, kind: "comparison" | "swimlanes" | "architec
       const sharedChildren = shared.map((block) => { const child = { block, x: cursor, y: pad }; cursor += block.width + gap; return child; });
       const regionY = pad + (shared.length ? sharedHeight + gap : 0);
       const children: { block: Block; x: number; y: number }[] = [...sharedChildren];
-      let y = regionY;
-      for (const row of rows) {
-        const band = rowHeight(row);
-        let x = pad;
-        for (const block of row) {
-          // Centred in its band, so a short region beside a tall one does not read as
-          // belonging to the top of it.
-          children.push({ block, x, y: y + (band - block.height) / 2 });
-          x += block.width + columnGap;
-        }
-        y += band + gap;
+      for (const cell of plan?.cells ?? []) {
+        // A stretched cell is a wider or taller box around the same contents.
+        const block = cell.width === cell.block.width && cell.height === cell.block.height
+          ? cell.block
+          : { ...cell.block, width: cell.width, height: cell.height };
+        children.push({ block, x: pad + cell.x, y: regionY + cell.y });
       }
       return { id: "__root", width, height: regionY + regionsHeight + pad, children, members: [] };
     }
@@ -304,9 +365,12 @@ function panels(view: MeasuredView, kind: "comparison" | "swimlanes" | "architec
     const gap = root ? (kind === "comparison" ? 180 : 96) : group?.layout.gap ?? 48;
     const pad = root ? 24 : 28;
     const top = root ? 24 : 62;
-    // Supporting siblings slide under whatever they hang off, so a store sits below the
-    // service that writes to it rather than below whichever sibling shares its column.
-    const cell = alignToAnchors(blocks, cols, anchors, (block) => block.node !== undefined);
+    // Two passes over the same grid. First the corridor: supporting siblings that would
+    // wrap into a row beneath the path go beside it instead, so the path can leave the
+    // container. Then the anchors: a store sits below the service that writes to it rather
+    // than below whichever sibling happens to share its column.
+    const isLeaf = (block: Block) => block.node !== undefined;
+    const cell = alignToAnchors(blocks, packForReading(blocks, cols, along, anchors), anchors, isLeaf);
     const usedCols = Math.max(1, ...cell.map((slot) => slot.column + 1));
     const colWidths = Array.from({ length: usedCols }, (_, col) => Math.max(0, ...blocks.filter((_, i) => cell[i]!.column === col).map((block) => block.width)));
     const rows = Math.max(1, ...cell.map((slot) => slot.row + 1));
@@ -338,7 +402,138 @@ function panels(view: MeasuredView, kind: "comparison" | "swimlanes" | "architec
   // that measurably does not help here.
   const edges = routeEdges(view, nodes, groups, distributeLanes, laneOrder);
   const annotations = placeAnnotations(view, nodes, groups, edges, root.height);
-  return refineLabels(view, { id: view.id, nodes, groups, edges, annotations, bounds: { x: 0, y: 0, width: Math.max(root.width, ...annotations.map((a) => a.x + a.width + 24)), height: root.height + (annotations.length ? Math.max(...annotations.map((a) => a.height)) + 44 : 0) } });
+  const geometry = refineLabels(view, { id: view.id, nodes, groups, edges, annotations, bounds: { x: 0, y: 0, width: Math.max(root.width, ...annotations.map((a) => a.x + a.width + 24)), height: root.height + (annotations.length ? Math.max(...annotations.map((a) => a.height)) + 44 : 0) } });
+  return { geometry, arrangements: arrangementCount };
+}
+
+/** Anything the region packer has to fit: only its measured box matters. */
+export interface Sized {
+  readonly width: number;
+  readonly height: number;
+}
+
+/** One region, placed — with the box it should actually occupy, which may be stretched. */
+export interface PlacedRegion<T> {
+  readonly block: T;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** A way of arranging the top-level regions, and the shape it produces. */
+export interface RegionArrangement<T> {
+  readonly cells: readonly PlacedRegion<T>[];
+  readonly width: number;
+  readonly height: number;
+  readonly deviation: number;
+  readonly shape: "rows" | "columns";
+}
+
+/**
+ * Candidate arrangements of the top-level regions, closest-to-target-shape first.
+ *
+ * A map of regions genuinely reads as one of two shapes, and which one is right is a
+ * property of the content rather than something that can be decided in advance:
+ *
+ * - **rows** — regions wrapped into bands, each band read left to right. Right when the
+ *   regions are of a similar size and the path works across them.
+ * - **columns** — a lead region standing beside a stack of the rest. Right when one region
+ *   is an entry point the reader passes through once (a client tier, an internet zone) and
+ *   the rest are a sequence the path descends through. Stacking those keeps each step
+ *   directly below the last, which is the whole reason a reader can follow it.
+ *
+ * Both were shipped at different times and each was wrong for the other's content. Rows
+ * replaced columns because a lead region beside a stack puts the deepest component of the
+ * largest region at maximum x, so the next step — in the region below — is a long journey
+ * back to the left. But rows have the mirror defect: two regions side by side in the same
+ * band are read as parallel, and a path that leaves one and enters the other has to cross
+ * the whole band. Neither is a default. Both are offered, and the caller lays each out and
+ * keeps the one that measures better.
+ *
+ * The ranking here is by shape alone, which is cheap and does not need routing. It decides
+ * only which candidates are worth the cost of a full layout, not which one wins.
+ */
+export function regionArrangements<T extends Sized>(
+  regions: readonly T[],
+  columnGap: number,
+  rowGap: number,
+  target: number,
+): RegionArrangement<T>[] {
+  if (regions.length === 0) return [];
+  const arrangements: RegionArrangement<T>[] = [];
+  for (const rows of rowSplitCandidates(regions, columnGap)) arrangements.push(placeInRows(rows, columnGap, rowGap, target));
+  // A lead group on the left, the rest stacked beside it. Only the split point is free:
+  // regions stay in reading order, so the left column is always a prefix.
+  for (let cut = 1; cut < regions.length; cut += 1) {
+    if (regions.length - cut < 2) continue; // a stack of one is just a row of two
+    arrangements.push(placeInColumns([regions.slice(0, cut), regions.slice(cut)], columnGap, rowGap, target));
+  }
+  // Rows first at equal shape, because a band is the more common reading and this keeps
+  // every existing diagram on the arrangement it already had.
+  return arrangements.sort(
+    (left, right) =>
+      left.deviation - right.deviation ||
+      (left.shape === right.shape ? 0 : left.shape === "rows" ? -1 : 1) ||
+      left.cells.length - right.cells.length,
+  );
+}
+
+function shapeDeviation(width: number, height: number, target: number): number {
+  if (width <= 0 || height <= 0) return Number.POSITIVE_INFINITY;
+  return Math.abs(Math.log(width / height / target));
+}
+
+function placeInRows<T extends Sized>(rows: readonly (readonly T[])[], columnGap: number, rowGap: number, target: number): RegionArrangement<T> {
+  const cells: PlacedRegion<T>[] = [];
+  let y = 0;
+  let width = 0;
+  for (const row of rows) {
+    const band = Math.max(0, ...row.map((block) => block.height));
+    let x = 0;
+    for (const block of row) {
+      // Centred in its band, so a short region beside a tall one does not read as
+      // belonging to the top of it.
+      cells.push({ block, x, y: y + (band - block.height) / 2, width: block.width, height: block.height });
+      x += block.width + columnGap;
+    }
+    width = Math.max(width, x - columnGap);
+    y += band + rowGap;
+  }
+  const height = y - rowGap;
+  return { cells, width, height, deviation: shapeDeviation(width, height, target), shape: "rows" };
+}
+
+/**
+ * Columns of regions, each column a vertical stack.
+ *
+ * Two things are stretched, and both are what makes a stack read as one:
+ *
+ * - every region in a column takes the column's width, so their left and right edges line
+ *   up and the reader sees a single channel rather than a ragged pile;
+ * - a column holding one region takes the full height, so a lead region reads as a margin
+ *   the whole composition sits beside rather than a box that happens to be first.
+ *
+ * Stretching only ever adds room. A region's contents keep the position the container gave
+ * them, so nothing inside moves and nothing can overlap as a result.
+ */
+function placeInColumns<T extends Sized>(columns: readonly (readonly T[])[], columnGap: number, rowGap: number, target: number): RegionArrangement<T> {
+  const widths = columns.map((column) => Math.max(0, ...column.map((block) => block.width)));
+  const heights = columns.map((column) => column.reduce((sum, block) => sum + block.height, 0) + Math.max(0, column.length - 1) * rowGap);
+  const height = Math.max(0, ...heights);
+  const cells: PlacedRegion<T>[] = [];
+  let x = 0;
+  for (const [index, column] of columns.entries()) {
+    let y = 0;
+    for (const block of column) {
+      const box = column.length === 1 ? height : block.height;
+      cells.push({ block, x, y, width: widths[index]!, height: box });
+      y += box + rowGap;
+    }
+    x += widths[index]! + columnGap;
+  }
+  const width = x - columnGap;
+  return { cells, width, height, deviation: shapeDeviation(width, height, target), shape: "columns" };
 }
 
 /**
@@ -352,7 +547,7 @@ function panels(view: MeasuredView, kind: "comparison" | "swimlanes" | "architec
  * Beyond that the candidates are greedy wraps at each prefix width, which is a small
  * spread of sensible shapes rather than an exhaustive one.
  */
-export function bestRowSplit<T extends { readonly width: number; readonly height: number }>(
+export function bestRowSplit<T extends Sized>(
   regions: readonly T[],
   columnGap: number,
   rowGap: number,
@@ -363,6 +558,29 @@ export function bestRowSplit<T extends { readonly width: number; readonly height
     width: Math.max(0, ...rows.map((row) => row.reduce((sum, block) => sum + block.width, 0) + Math.max(0, row.length - 1) * columnGap)),
     height: rows.reduce((sum, row) => sum + Math.max(0, ...row.map((block) => block.height)), 0) + Math.max(0, rows.length - 1) * rowGap,
   });
+  const candidates = rowSplitCandidates(regions);
+  let best: { rows: T[][]; deviation: number } | undefined;
+  for (const rows of candidates) {
+    const { width, height } = shapeOf(rows);
+    if (width <= 0 || height <= 0) continue;
+    const deviation = Math.abs(Math.log(width / height / target));
+    // Ties go to fewer rows: a wider, shallower arrangement reads across in one sweep.
+    if (!best || deviation < best.deviation - 1e-9 || (Math.abs(deviation - best.deviation) <= 1e-9 && rows.length < best.rows.length)) {
+      best = { rows, deviation };
+    }
+  }
+  return best?.rows ?? [[...regions]];
+}
+
+/**
+ * Every way of breaking the regions into consecutive rows that is worth trying.
+ *
+ * Regions stay in reading order within and across rows; only where the rows break is free.
+ * Every composition is enumerated while that is cheap. Beyond that the candidates are
+ * greedy wraps at each prefix width, which is a small spread of sensible shapes rather
+ * than an exhaustive one.
+ */
+function rowSplitCandidates<T extends Sized>(regions: readonly T[], columnGap = 120): T[][][] {
   const split = (sizes: readonly number[]): T[][] => {
     const rows: T[][] = [];
     let cursor = 0;
@@ -398,17 +616,7 @@ export function bestRowSplit<T extends { readonly width: number; readonly height
       candidates.push(rows);
     }
   }
-  let best: { rows: T[][]; deviation: number } | undefined;
-  for (const rows of candidates) {
-    const { width, height } = shapeOf(rows);
-    if (width <= 0 || height <= 0) continue;
-    const deviation = Math.abs(Math.log(width / height / target));
-    // Ties go to fewer rows: a wider, shallower arrangement reads across in one sweep.
-    if (!best || deviation < best.deviation - 1e-9 || (Math.abs(deviation - best.deviation) <= 1e-9 && rows.length < best.rows.length)) {
-      best = { rows, deviation };
-    }
-  }
-  return best?.rows ?? [[...regions]];
+  return candidates;
 }
 
 /**

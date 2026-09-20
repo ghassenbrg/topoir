@@ -58,8 +58,24 @@ describe("the request spine reads in the order it happens in", () => {
       expect(region.x, `${STORY[index]} -> ${id} goes backwards, so it must wrap to a row at the left margin`).toBeCloseTo(leftMargin, 0);
       expect(current.y, `${STORY[index]} -> ${id} must move down to the next row`).toBeGreaterThan(previous.y);
     }
-    // One wrap is a progression across two rows. Several would be a zigzag.
-    expect(backward.length, `backward steps: ${backward.join(", ")}`).toBeLessThanOrEqual(1);
+    /**
+     * Every wrap must reach a row the path has not been in before, and the rows must be
+     * met in order — which is what "reads like prose" actually means and what a zigzag
+     * violates.
+     *
+     * This replaces a cap of one backward step. That cap was a proxy for the same
+     * property, written when the composition put this content in two rows; it counted
+     * wraps rather than checking where they landed, so it called a legitimate third row a
+     * zigzag. The picture that broke it is measurably better on every axis the cap was
+     * standing in for — 9 edge crossings down to 3, and 2100x1140 down to 2023x993 — so
+     * the proxy was replaced by the property, not relaxed.
+     */
+    const rowTops = STORY.map((id) => regionOf(id).y);
+    for (const [index, top] of rowTops.slice(1).entries()) {
+      expect(top, `${STORY[index]} -> ${STORY[index + 1]} must not go back up to an earlier row`).toBeGreaterThanOrEqual(rowTops[index]!);
+    }
+    const distinct = [...new Set(rowTops)];
+    expect(distinct.length, `the path spans ${distinct.length} rows in ${backward.length + 1} runs`).toBe(backward.length + 1);
   });
 
   it("puts the balancer before the components it feeds", async () => {
@@ -138,5 +154,30 @@ describe("ordering by the path must not cost legibility elsewhere", () => {
     expect(view!.quality.metrics.readability.edgeCrossings).toBe(0);
     expect(view!.quality.metrics.readability.coincidentEdgeSegments).toBe(0);
     expect(view!.quality.metrics.readability.labelOverlaps).toBe(0);
+  });
+});
+
+describe("the arrangement is chosen for a drawing someone has to read", () => {
+  it("does not prefer a shape the medium cannot show at a readable size", async () => {
+    /**
+     * The composition searches several arrangements of the top-level regions and keeps the
+     * one that measures best. Until the score included the medium, "best" meant fewest
+     * crossings — and a wider arrangement wins on crossings while being scaled down harder
+     * to reach the page. On this content that produced a layout with 2 edge crossings
+     * instead of 9 whose text landed at 8.35px against the medium's 9px minimum: better on
+     * every counter the search could see, and rejected by the gate for a reason the search
+     * was never told.
+     *
+     * Acceptance has always known this. The requirement is that the search knows it too,
+     * so the two cannot disagree.
+     */
+    const source = readFileSync(new URL(SHOWCASE, import.meta.url), "utf8");
+    const result = await new TopoIRCompiler().compile(source);
+    const view = result.views[0];
+    expect(view?.geometry, "the showcase must compile").toBeDefined();
+    const illegible = view!.quality.violations.filter((entry) => entry.code === "TOP460_TEXT_BELOW_MEDIUM_MINIMUM");
+    expect(illegible.map((entry) => entry.message), "the chosen arrangement must stay readable at the size it is for").toEqual([]);
+    // And the gate agrees, which is the point: the search and acceptance judge one thing.
+    expect(view!.quality.accepted, `blocked at ${view!.quality.blockedAt ?? "nothing"}`).toBe(true);
   });
 });
