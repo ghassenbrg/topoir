@@ -1,8 +1,8 @@
 # Implementation status
 
-Last updated: 2026-09-19. This file is the live execution ledger for the design program.
+Last updated: 2026-09-20. This file is the live execution ledger for the design program.
 
-**Program state: in progress. M0, M1 and M2 complete. Next task: T16 slice 2 (group-level spine ordering). Current milestone: M3 (T16–T20).**
+**Program state: in progress. M0, M1 and M2 complete. Next task: T16 slice 3 (explicit supporting bands). Current milestone: M3 (T16–T20).**
 
 The full review previously verified `bc64cf2`: 91 tests in 15 files passed; 240/240 synthetic cases compiled without hard geometry defects; 220/240 passed the selected defect counters; six reference candidates were deterministic with no approved parity recorded. These are historical baseline observations, not evidence that the tasks below are implemented. The design-writing task added documents/examples only.
 
@@ -26,7 +26,7 @@ Allowed task states: `not_started`, `in_progress`, `implemented_pending_gate`, `
 | T13 | M2 | complete | Style resolution with authored-token tracking, semantic roles surviving focus/muting, surface-aware text colour. Fixed all 9 invisible-text corpus cases with zero golden changes. See session entry. |
 | T14 | M2 | complete | valid/completion/accepted separated, one gate order for all families, lexicographic candidate vector, absent metrics stay absent. Legacy `ok` preserved. See session entry. |
 | T15 | M2 | complete | `@topoir/layout` orchestration with declared backend capabilities and constraint admission; `layout-elk` unchanged as an adapter. See session entry. |
-| T16 | M3 | in_progress | Spine analysis, feedback roles, supporting classification and impossible-order reporting land. **Trust-zone progression is measurably NOT met** — the spine crosses group boundaries and `banded` orders within each group independently. See session entry. |
+| T16 | M3 | in_progress | Slices 1–2 land: spine analysis, feedback roles, impossible-order reporting, and reading order across siblings. **Trust-zone progression now met and asserted** (`packages/sdk/test/progression.test.ts`). Supporting bands and branch/feedback decomposition still outstanding. See session entries. |
 | T17 | M3 | not_started | |
 | T18 | M3 | not_started | |
 | T19 | M3 | not_started | |
@@ -1440,3 +1440,127 @@ set, empty by default), `layout/src/orchestrate.ts`, `layout/src/backend.ts`,
 
 **Next ready task: T16 slice 2.** T17 also depends on T15 and T11 and is ready if the
 placement work is deferred.
+
+---
+
+## T16 slice 2 — reading order across siblings (2026-09-20)
+
+**State: the trust-zone progression criterion is now met and pinned by a test.** The
+criterion I recorded as unmet in slice 1 is met; two further slices of T16 remain.
+
+### What the diagram actually looked like
+
+Rendering the showcase rather than reading coordinates showed a worse problem than
+"non-monotonic x". The author's own story is
+`customer → edge → lb → frontend → core → f5 → card-core`, and the drawing placed it
+`customer@52, edge@322, lb@712, frontend@1373, core@1656, f5@712, card-core@954` — the
+numbered path ran left, far right, down and back nearly a thousand pixels. Two distinct
+causes, both real:
+
+1. **`panels()` never consulted sibling `order` at all.** Its child list was every boundary
+   followed by every component, in source order. The load balancer — step 3 — was drawn to
+   the right of steps 4 and 5 because it is not a boundary. `banded()` had a comparator;
+   the panel families had none.
+2. **The `architecture-map` root shape was hard-coded** to one lead region on the left with
+   every other region stacked in a column beside it. That puts the deepest component of the
+   largest region at maximum x, so the next step — in the region below — is a long journey
+   back, and every connector leaving that component crowds one face of it.
+
+### What landed
+
+- `packages/layout-elk/src/ordering.ts`, new: one comparator for reading order, used by
+  both families. A declared `order` ranks a sibling **against other siblings that also
+  declare one**; otherwise the sibling the primary path reaches first comes first; otherwise
+  declared order, then id. Entry position is the **earliest** member, so a boundary is
+  ranked by where it is entered.
+- `bestRowSplit`: the architecture-map root wraps regions into the rows that come closest to
+  the author's target ratio, keeping reading order within and across rows.
+- `banded()` and `panels()` both take `OrderingHints { excludeFromOrdering, spine }`.
+
+Measured after: `52, 322, 52, 713, 997, 1399, 1642` — one backward step, the row wrap, and
+it returns to the left margin. Ratio 1.70 → 1.84 against a 2.10 target.
+
+### Three things the evidence said I had got wrong
+
+These are the substance of the slice.
+
+**1. An inferred spine must not reorder siblings.** Wiring the spine through unconditionally
+moved the generalization corpus 21 → 20 failures, which looks like a win and is not one. The
+detail: `case-0165`'s hard `TOP452_MARK_CLIPPED` error and `case-0084` were fixed, but
+`case-0033` and `case-0239` began failing and `case-0006` (2→4) and `case-0177` (6→13, plus a
+label overlap) got worse. No corpus case authors a story, so every one of those spines was
+*inferred*. On a mesh the longest advancing chain is an artefact of the graph, not a reading
+order, and using it to override the barycenter — which is measurably shortening connectors —
+is not justified. `SpineAnalysis.source` now records `authored` vs `inferred` and only an
+authored story is offered as a reading order, via `readingOrder()`. Feedback exclusion still
+applies either way, because a cycle-closing relationship is not forward progress however the
+path was found. **The corpus is now byte-identical to baseline (21 failures, same cases).**
+
+**2. Ordering by the path across the reading direction broke a reference diagram.** With the
+authored-only gate in place, `pockito-reference` — which also declares a story — went from
+**0 edge crossings to 2**. Its cluster is a *layered* container, where the sibling sort is
+the band *across* the flow: every sibling there is at the same point along the path, so path
+position is meaningless and the barycenter it displaces is the thing minimising crossings.
+The rule lifted the API boundary above a sibling component purely because the path entered
+it. `ordersAlongReading()` now restricts path ordering to sequences running the same way the
+reading does, and excludes layered containers outright. Pockito is back to 0 crossings and
+byte-identical, and `packages/sdk/test/progression.test.ts` pins it.
+
+**3. Adding route separation to the panel families was wrong and was reverted.** The
+intermediate arrangement produced a `TOP425_EDGE_SEGMENTS_COINCIDENT` between `invoke` and
+`partner-call`, and I added the `separateCoincidentRoutes` pass that every other family runs.
+Justification by consistency did not survive measurement: across the trust-zone content at
+eight aspect targets the pass changed exactly one result and made it **worse** (2 coincident
+segments became 3), because `separateOnce` reroutes through a grid search tuned to banded
+obstacles. The row change had already removed the real coincidence. Reverted, with the reason
+recorded in the code.
+
+### A vacuous test I wrote and then fixed
+
+`spineEntry` "is the earliest member" passed against an implementation that kept the **last**
+match, because the fixture happened to list the late member first. Caught by breaking the
+code deliberately. The test now asserts both member orderings.
+
+### Verification
+
+| Command | Outcome |
+| --- | --- |
+| `pnpm check` | build + typecheck clean; **530 tests in 37 files passed** (498 after slice 1) |
+| render comparison, 20 examples + pockito png/svg/manifest | only `showcase/trust-zones.png` changed; inspected and regenerated |
+| `pnpm benchmark:generalization` | 21 failures — **identical case list to baseline** |
+| `pnpm benchmark:references` | deterministic; parity still `unreviewed` 0/6 |
+| load-bearing checks | 5 deliberate breaks; 4 caught immediately, 1 exposed the vacuous test above, which was then strengthened and re-verified |
+
+**Files added:** `packages/layout-elk/src/ordering.ts`,
+`packages/layout-elk/test/ordering.test.ts` (22), `packages/sdk/test/progression.test.ts` (5).
+**Changed:** `layout-elk/src/banded.ts`, `composition.ts`, `index.ts`, `layout/src/spine.ts`
+(`source`, `readingOrder`), `layout/src/orchestrate.ts`, `layout/test/spine.test.ts` (+5).
+
+### Honest remaining state of this diagram
+
+The progression reads, but the showcase is not a finished picture. Measured and visible:
+the canvas is sparse toward the bottom right, the shape is 1.84 against a 2.10 target, and
+`External locations` opens a third row for a single component. Panel layouts can still
+produce coincident routes that nothing removes — 2 on this content at a 1.6 target — which
+belongs to T18/T19 routing, not here.
+
+### Remaining for T16
+
+- **Explicit supporting bands** — supporting components are classified but not placed in a
+  reserved band. Pockito's identity lands outside the spine band emergently, not by design.
+- **Branch/feedback decomposition and mixed local orientation** — not started.
+
+**Carried, unchanged:** constraints compiled but not consumed by layout (T19);
+`composition.ts` not split into stages (T18); one candidate produced despite candidate
+ranking existing (T19) — the architecture-map row split is chosen by aspect alone and is not
+part of candidate ranking; `stabilityCost` always 0 (T29); no CLI `migrate` command; groups,
+annotations and edge labels have no ComponentPlans;
+`examples/rendered/showcase/custom-assets.png` still stale from before T01.
+
+**Outstanding human gate: reference parity 0/6 `unreviewed`.** Only a person may add records
+to `benchmarks/reference-reviews.json`. Nothing in this slice changes that, and no visual
+approval is claimed for the trust-zone change — it is supported by measurements and by the
+rendered comparison above, not by a recorded review.
+
+**Next ready task: T16 slice 3 (supporting bands).** T17 also depends on T15 and T11 and is
+ready.

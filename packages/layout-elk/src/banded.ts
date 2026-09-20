@@ -7,6 +7,7 @@ import type {
   MeasuredNode,
   MeasuredView,
 } from "@topoir/core";
+import { compareForReading, ordersAlongReading, rankForReading, spinePositions, type OrderingHints } from "./ordering.js";
 
 /**
  * Compiler-owned banded composition.
@@ -64,12 +65,14 @@ export interface BandedSpacing {
 
 
 /**
- * @param excludeFromOrdering relationship ids that must not influence layer assignment.
- * A feedback relationship — a callback, an ack, a retry — is still drawn and routed, but
- * treating it as forward progress pushes its target a band further along and the primary
- * flow stops reading in the order it happens in. See `analyzeSpine` in `@topoir/layout`.
+ * @param hints what the caller knows about reading order — which relationships are
+ * feedback and must not order the layout, and which components the primary path runs
+ * through. See `analyzeSpine` in `@topoir/layout`. With no hints the arrangement is
+ * unchanged.
  */
-export function banded(view: MeasuredView, spacing: BandedSpacing, excludeFromOrdering: ReadonlySet<string> = new Set()): GeometryView {
+export function banded(view: MeasuredView, spacing: BandedSpacing, hints: OrderingHints = {}): GeometryView {
+  const excludeFromOrdering = hints.excludeFromOrdering ?? new Set<string>();
+  const spineIndex = spinePositions(hints.spine);
   const horizontal = view.layout.direction === "right" || view.layout.direction === "left";
   const groupsByParent = new Map<string | undefined, MeasuredGroup[]>();
   for (const group of view.groups) {
@@ -95,7 +98,7 @@ export function banded(view: MeasuredView, spacing: BandedSpacing, excludeFromOr
       ...(nodesByGroup.get(groupId) ?? []).map((node) => ({ id: node.id, width: node.width, height: node.height, order: node.order, members: [node.id], node })),
     ];
     const mode = group?.layout.mode ?? "layered";
-    const placements = arrange(items, view, spacing, horizontal, mode, group, excludeFromOrdering);
+    const placements = arrange(items, view, spacing, horizontal, mode, group, excludeFromOrdering, spineIndex);
     const contentWidth = Math.max(0, ...placements.map((placement) => placement.dx + placement.item.width));
     const contentHeight = Math.max(0, ...placements.map((placement) => placement.dy + placement.item.height));
     if (group === undefined) return { width: contentWidth, height: contentHeight, placements };
@@ -151,9 +154,15 @@ function arrange(
   mode: MeasuredGroup["layout"]["mode"] | "layered",
   group: MeasuredGroup | undefined,
   excludeFromOrdering: ReadonlySet<string> = new Set(),
+  spineIndex: ReadonlyMap<string, number> = new Map(),
 ): Placement[] {
   if (items.length === 0) return [];
   const gap = group?.layout.gap ?? spacing.node;
+  // The path can only order a sequence that runs the same way it does. See
+  // `ordersAlongReading`; in a layered container the sibling sort is the band, across the
+  // flow, and the barycenter owns it.
+  const readingIndex = ordersAlongReading(mode, horizontal) ? spineIndex : new Map<string, number>();
+  const compareItems = (left: Item, right: Item): number => compareForReading(left, right, readingIndex);
 
   if (mode === "column" || mode === "row") {
     // One lane in the declared sequence — but a lane is wrapped once it grows absurdly
@@ -224,7 +233,7 @@ function arrange(
   }
   const layerIndices = [...byLayer.keys()].sort((left, right) => left - right);
   for (const index of layerIndices) byLayer.get(index)!.sort(compareItems);
-  barycenterSweeps(byLayer, layerIndices, links, 4);
+  barycenterSweeps(byLayer, layerIndices, links, 4, readingIndex);
 
   const layerGap = group?.layout.gap ?? spacing.layer;
   const laneExtent = (laneItems: readonly Item[]): number =>
@@ -251,22 +260,17 @@ function arrange(
   return placements;
 }
 
-function compareItems(left: Item, right: Item): number {
-  const leftRank = left.order ?? Number.POSITIVE_INFINITY;
-  const rightRank = right.order ?? Number.POSITIVE_INFINITY;
-  if (leftRank !== rightRank) return leftRank - rightRank;
-  return left.id.localeCompare(right.id, "en");
-}
-
 /**
  * Move unranked items towards the average band of the items they connect to. Ranked items
- * never move, so an author's declared sequence survives every sweep.
+ * never move, so an author's declared sequence survives every sweep — and neither does an
+ * item the primary path pins, or the sweep would undo the reading order in the band.
  */
 function barycenterSweeps(
   byLayer: Map<number, Item[]>,
   layerIndices: readonly number[],
   links: readonly { readonly from: string; readonly to: string }[],
   passes: number,
+  spineIndex: ReadonlyMap<string, number>,
 ): void {
   const neighbours = new Map<string, string[]>();
   for (const link of links) {
@@ -290,10 +294,12 @@ function barycenterSweeps(
         return { item, barycenter: bands.length ? bands.reduce((sum, band) => sum + band, 0) / bands.length : position };
       });
       keyed.sort((left, right) => {
-        const leftRank = left.item.order ?? Number.POSITIVE_INFINITY;
-        const rightRank = right.item.order ?? Number.POSITIVE_INFINITY;
-        if (leftRank !== rightRank) return leftRank - rightRank;
-        if (leftRank !== Number.POSITIVE_INFINITY) return 0;
+        const decided = rankForReading(left.item, right.item, spineIndex);
+        if (decided !== 0) return decided;
+        // The reading rules do not separate these. Two siblings the author gave the same
+        // rank keep the order they are already in; otherwise the barycenter decides, which
+        // is what keeps connectors short.
+        if (left.item.order !== undefined && right.item.order !== undefined) return 0;
         if (left.barycenter !== right.barycenter) return left.barycenter - right.barycenter;
         return left.item.id.localeCompare(right.item.id, "en");
       });

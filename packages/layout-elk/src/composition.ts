@@ -2,17 +2,18 @@ import { analyzeGeometry, type QualityReport, type GeometryView, type GeometryNo
 import { ElkLayoutEngine } from "./index.js";
 import { obstacleRoute, segmentHitsRect } from "./routing.js";
 import { banded, type BandedSpacing } from "./banded.js";
+import { orderForReading, ordersAlongReading, spinePositions, type OrderingHints } from "./ordering.js";
 
 /** Compiler-owned composition. Fixed candidate order is also the tie-break order. */
 export class CompositionEngine implements LayoutEngine {
   readonly id = "topoir-composition-v1";
 
   /**
-   * @param excludeFromOrdering relationship ids that must not influence layer assignment,
-   * from the caller's spine analysis. Empty by default, so nothing changes for a caller
-   * that does not supply one.
+   * @param hints what the caller's spine analysis found: which relationships are feedback
+   * and must not order the layout, and which components the primary path runs through.
+   * Empty by default, so nothing changes for a caller that does not supply one.
    */
-  async layout(view: MeasuredView, excludeFromOrdering: ReadonlySet<string> = new Set()): Promise<LayoutResult> {
+  async layout(view: MeasuredView, hints: OrderingHints = {}): Promise<LayoutResult> {
     const kind = view.design?.composition ?? "topology";
     if (["sequence", "comparison", "swimlanes", "architecture-map"].includes(kind) && view.edges.some((edge) => edge.sourcePort || edge.targetPort)) {
       return { diagnostics: [{ code: "TOP402_COMPOSITION_PORT_UNSUPPORTED", severity: "error", message: `${kind} does not yet support explicit endpoint ports. Use topology/layers or omit the port constraints.` }] };
@@ -23,7 +24,7 @@ export class CompositionEngine implements LayoutEngine {
       // decide rather than imposing it.
       const routings: [boolean, LaneOrder][] = [[true, "fan"], [true, "reach"], [false, "fan"]];
       const evaluated = routings.map(([distributeLanes, laneOrder]) => {
-        const geometry = panels(view, kind, distributeLanes, laneOrder);
+        const geometry = panels(view, kind, distributeLanes, laneOrder, hints);
         return { geometry, score: compositionScore(view, geometry) };
       });
       evaluated.sort((left, right) => left.score - right.score);
@@ -53,7 +54,7 @@ export class CompositionEngine implements LayoutEngine {
       let best: { geometry: GeometryView; score: number; defects: number } | undefined;
       let evaluated = 0;
       for (const spacing of spacings) {
-        const placed = banded(view, spacing, excludeFromOrdering);
+        const placed = banded(view, spacing, hints);
         for (const [distributeLanes, laneOrder] of routings) {
           const routed = separateCoincidentRoutes(view, refineRoutes(view, { ...placed, edges: routeEdges(view, placed.nodes, placed.groups, distributeLanes, laneOrder) }));
           const annotations = placeAnnotations(view, routed.nodes, routed.groups, routed.edges, placed.bounds.height);
@@ -216,15 +217,28 @@ function sequence(view: MeasuredView): GeometryView {
   return { id: view.id, nodes, groups: groupRects, edges, annotations, bounds: { x: 0, y: 0, width: x - gap + 24 + (annotations.length ? Math.max(...annotations.map((a) => a.width)) + gap : 0), height: Math.max(y + 12, ...annotations.map((a) => a.y + a.height + 24)) } };
 }
 
-interface Block { id: string; width: number; height: number; node?: MeasuredNode; children?: { block: Block; x: number; y: number }[]; parent?: string }
+interface Block { id: string; width: number; height: number; node?: MeasuredNode; children?: { block: Block; x: number; y: number }[]; parent?: string; order?: number | undefined; members: readonly string[] }
 
-function panels(view: MeasuredView, kind: "comparison" | "swimlanes" | "architecture-map", distributeLanes: boolean, laneOrder: LaneOrder): GeometryView {
+function panels(view: MeasuredView, kind: "comparison" | "swimlanes" | "architecture-map", distributeLanes: boolean, laneOrder: LaneOrder, hints: OrderingHints = {}): GeometryView {
+  const spineIndex = spinePositions(hints.spine);
+  const horizontal = view.layout.direction === "right" || view.layout.direction === "left";
+  const membersOf = (groupId: string): string[] => [
+    ...view.nodes.filter((node) => node.group === groupId).map((node) => node.id),
+    ...view.groups.filter((child) => child.parent === groupId).flatMap((child) => membersOf(child.id)),
+  ];
   const build = (id?: string): Block => {
     const group = view.groups.find((item) => item.id === id);
-    const blocks: Block[] = [
-      ...view.groups.filter((item) => item.parent === id).map((item) => build(item.id)),
-      ...view.nodes.filter((item) => item.group === id).map((node) => ({ id: node.id, width: node.width, height: node.height, node })),
-    ];
+    // Sibling boundaries and sibling components are one sequence, not two. Listing every
+    // boundary before every component put a load balancer that is step 3 of the author's
+    // own story behind the two components it feeds, purely because it is not a boundary.
+    // The root arranges regions into rows along the reading direction; a nested container
+    // follows its own mode, and only orders by the path when that mode runs the same way.
+    const mode = id === undefined ? "row" : view.groups.find((item) => item.id === id)?.layout.mode === "auto" ? "column" : view.groups.find((item) => item.id === id)?.layout.mode ?? "column";
+    const along = id === undefined || ordersAlongReading(mode, horizontal) ? spineIndex : new Map<string, number>();
+    const blocks: Block[] = orderForReading([
+      ...view.groups.filter((item) => item.parent === id).map((item) => ({ ...build(item.id), order: item.order, members: membersOf(item.id) })),
+      ...view.nodes.filter((item) => item.group === id).map((node) => ({ id: node.id, width: node.width, height: node.height, node, order: node.order, members: [node.id] })),
+    ], along);
     const root = id === undefined;
     if (root && kind === "comparison") {
       const panels = blocks.filter((block) => block.node === undefined);
@@ -242,32 +256,46 @@ function panels(view: MeasuredView, kind: "comparison" | "swimlanes" | "architec
       cursor = panelStart;
       const panelY = pad + (shared.length ? sharedHeight + 72 : 0);
       const panelChildren = panels.map((block) => { const child = { block, x: cursor, y: panelY }; cursor += block.width + panelGap; return child; });
-      return { id: "__root", width, height: panelY + panelHeight + pad, children: [...sharedChildren, ...panelChildren] };
+      return { id: "__root", width, height: panelY + panelHeight + pad, children: [...sharedChildren, ...panelChildren], members: [] };
     }
     if (root && kind === "architecture-map") {
       const regions = blocks.filter((block) => block.node === undefined);
       const shared = blocks.filter((block) => block.node !== undefined);
       const pad = 24, gap = 64, columnGap = 120;
-      const lead = regions[0];
-      const right = regions.slice(1);
-      const rightWidth = Math.max(0, ...right.map((block) => block.width));
-      const rightHeight = right.reduce((sum, block) => sum + block.height, 0) + Math.max(0, right.length - 1) * gap;
-      const regionHeight = Math.max(lead?.height ?? 0, rightHeight);
-      const regionsWidth = (lead?.width ?? 0) + (lead && right.length ? columnGap : 0) + rightWidth;
+      // Regions read in the order the primary path meets them, wrapped into rows.
+      //
+      // They used to be one lead region on the left with every other region stacked in a
+      // column beside it. That shape puts the deepest component of the largest region at
+      // maximum x, so the next step of the path — in the region below — is a long journey
+      // back to the left, and every connector leaving that component crowds one face of
+      // it. Rows in reading order keep each step near the last one.
+      const rows = bestRowSplit(regions.map((block) => block), columnGap, gap, view.layout.aspectRatio > 0 ? view.layout.aspectRatio : 1.6);
+      const rowWidth = (row: readonly Block[]): number =>
+        row.reduce((sum, block) => sum + block.width, 0) + Math.max(0, row.length - 1) * columnGap;
+      const rowHeight = (row: readonly Block[]): number => Math.max(0, ...row.map((block) => block.height));
+      const regionsWidth = Math.max(0, ...rows.map(rowWidth));
+      const regionsHeight = rows.reduce((sum, row) => sum + rowHeight(row), 0) + Math.max(0, rows.length - 1) * gap;
       const sharedWidth = shared.reduce((sum, block) => sum + block.width, 0) + Math.max(0, shared.length - 1) * gap;
       const width = Math.max(regionsWidth, sharedWidth) + pad * 2;
       const sharedHeight = Math.max(0, ...shared.map((block) => block.height));
       let cursor = pad + (width - pad * 2 - sharedWidth) / 2;
       const sharedChildren = shared.map((block) => { const child = { block, x: cursor, y: pad }; cursor += block.width + gap; return child; });
       const regionY = pad + (shared.length ? sharedHeight + gap : 0);
-      const regionStart = pad + (width - pad * 2 - regionsWidth) / 2;
       const children: { block: Block; x: number; y: number }[] = [...sharedChildren];
-      if (lead) children.push({ block: lead, x: regionStart, y: regionY + (regionHeight - lead.height) / 2 });
       let y = regionY;
-      for (const block of right) { children.push({ block, x: regionStart + (lead?.width ?? 0) + (lead ? columnGap : 0), y }); y += block.height + gap; }
-      return { id: "__root", width, height: regionY + regionHeight + pad, children };
+      for (const row of rows) {
+        const band = rowHeight(row);
+        let x = pad;
+        for (const block of row) {
+          // Centred in its band, so a short region beside a tall one does not read as
+          // belonging to the top of it.
+          children.push({ block, x, y: y + (band - block.height) / 2 });
+          x += block.width + columnGap;
+        }
+        y += band + gap;
+      }
+      return { id: "__root", width, height: regionY + regionsHeight + pad, children, members: [] };
     }
-    const mode = root ? "row" : group?.layout.mode === "auto" ? "column" : group?.layout.mode ?? "column";
     const cols = mode === "row" ? Math.max(1, blocks.length) : mode === "grid" || mode === "pack" ? group?.layout.columns ?? 2 : 1;
     const gap = root ? (kind === "comparison" ? 180 : 96) : group?.layout.gap ?? 48;
     const pad = root ? 24 : 28;
@@ -276,7 +304,7 @@ function panels(view: MeasuredView, kind: "comparison" | "swimlanes" | "architec
     const rows = Math.ceil(blocks.length / cols);
     const rowHeights = Array.from({ length: rows }, (_, row) => Math.max(0, ...blocks.slice(row * cols, (row + 1) * cols).map((block) => block.height)));
     const children = blocks.map((block, i) => ({ block, x: pad + colWidths.slice(0, i % cols).reduce((a, b) => a + b + gap, 0), y: top + rowHeights.slice(0, Math.floor(i / cols)).reduce((a, b) => a + b + gap, 0) }));
-    return { id: id ?? "__root", width: Math.max(group ? group.labelText.width + 56 : 0, pad * 2 + colWidths.reduce((a, b) => a + b, 0) + (cols - 1) * gap), height: top + pad + rowHeights.reduce((a, b) => a + b, 0) + Math.max(0, rows - 1) * gap, children, ...(group?.parent ? { parent: group.parent } : {}) };
+    return { id: id ?? "__root", width: Math.max(group ? group.labelText.width + 56 : 0, pad * 2 + colWidths.reduce((a, b) => a + b, 0) + (cols - 1) * gap), height: top + pad + rowHeights.reduce((a, b) => a + b, 0) + Math.max(0, rows - 1) * gap, children, members: [], ...(group?.parent ? { parent: group.parent } : {}) };
   };
   const root = build();
   const nodes: GeometryNode[] = [], groups: GeometryGroup[] = [];
@@ -288,9 +316,88 @@ function panels(view: MeasuredView, kind: "comparison" | "swimlanes" | "architec
     }
   };
   walk(root, 0, 0);
+  // No route-separation pass here, unlike the banded and layered families.
+  //
+  // Adding one was tried and reverted. Across the trust-zone content at eight aspect
+  // targets it changed exactly one result and made it worse — 2 coincident segments became
+  // 3 — because `separateOnce` reroutes through a grid search tuned to banded obstacles and
+  // a panel row gives it a different structure to work with. Panel layouts *can* still
+  // produce coincident routes (2 at a 1.6 target on that content) and nothing removes them;
+  // that is an open routing defect for T18/T19, not something to paper over with a stage
+  // that measurably does not help here.
   const edges = routeEdges(view, nodes, groups, distributeLanes, laneOrder);
   const annotations = placeAnnotations(view, nodes, groups, edges, root.height);
   return refineLabels(view, { id: view.id, nodes, groups, edges, annotations, bounds: { x: 0, y: 0, width: Math.max(root.width, ...annotations.map((a) => a.x + a.width + 24)), height: root.height + (annotations.length ? Math.max(...annotations.map((a) => a.height)) + 44 : 0) } });
+}
+
+/**
+ * Wrap regions into the rows that come closest to the shape the author asked for.
+ *
+ * The split changes the bounding box and nothing else — routing quality is decided after
+ * placement — so aspect is exactly the right thing to choose it by. Regions stay in reading
+ * order within and across rows; only where the rows break is free.
+ *
+ * Every way of breaking `n` regions into consecutive rows is tried while that is cheap.
+ * Beyond that the candidates are greedy wraps at each prefix width, which is a small
+ * spread of sensible shapes rather than an exhaustive one.
+ */
+export function bestRowSplit<T extends { readonly width: number; readonly height: number }>(
+  regions: readonly T[],
+  columnGap: number,
+  rowGap: number,
+  target: number,
+): T[][] {
+  if (regions.length <= 1) return regions.length ? [[...regions]] : [];
+  const shapeOf = (rows: readonly (readonly T[])[]): { width: number; height: number } => ({
+    width: Math.max(0, ...rows.map((row) => row.reduce((sum, block) => sum + block.width, 0) + Math.max(0, row.length - 1) * columnGap)),
+    height: rows.reduce((sum, row) => sum + Math.max(0, ...row.map((block) => block.height)), 0) + Math.max(0, rows.length - 1) * rowGap,
+  });
+  const split = (sizes: readonly number[]): T[][] => {
+    const rows: T[][] = [];
+    let cursor = 0;
+    for (const size of sizes) { rows.push(regions.slice(cursor, cursor + size)); cursor += size; }
+    if (cursor < regions.length) rows.push(regions.slice(cursor));
+    return rows;
+  };
+  const candidates: T[][][] = [];
+  if (regions.length <= 6) {
+    // Every composition of n: each of the n-1 gaps is either a row break or not.
+    for (let mask = 0; mask < 1 << (regions.length - 1); mask += 1) {
+      const sizes: number[] = [];
+      let run = 1;
+      for (let gap = 0; gap < regions.length - 1; gap += 1) {
+        if (mask & (1 << gap)) { sizes.push(run); run = 1; } else run += 1;
+      }
+      sizes.push(run);
+      candidates.push(split(sizes));
+    }
+  } else {
+    const budgets = new Set<number>([Math.max(...regions.map((block) => block.width))]);
+    let running = 0;
+    for (const [index, block] of regions.entries()) { running += block.width + (index ? columnGap : 0); budgets.add(running); }
+    for (const budget of budgets) {
+      const rows: T[][] = [[]];
+      let used = 0;
+      for (const block of regions) {
+        const extra = (rows[rows.length - 1]!.length ? columnGap : 0) + block.width;
+        if (rows[rows.length - 1]!.length && used + extra > budget) { rows.push([]); used = 0; }
+        rows[rows.length - 1]!.push(block);
+        used += rows[rows.length - 1]!.length === 1 ? block.width : extra;
+      }
+      candidates.push(rows);
+    }
+  }
+  let best: { rows: T[][]; deviation: number } | undefined;
+  for (const rows of candidates) {
+    const { width, height } = shapeOf(rows);
+    if (width <= 0 || height <= 0) continue;
+    const deviation = Math.abs(Math.log(width / height / target));
+    // Ties go to fewer rows: a wider, shallower arrangement reads across in one sweep.
+    if (!best || deviation < best.deviation - 1e-9 || (Math.abs(deviation - best.deviation) <= 1e-9 && rows.length < best.rows.length)) {
+      best = { rows, deviation };
+    }
+  }
+  return best?.rows ?? [[...regions]];
 }
 
 /**

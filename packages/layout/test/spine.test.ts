@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MeasuredView } from "@topoir/core";
-import { analyzeSpine, orderingExclusions } from "../src/index.js";
+import { analyzeSpine, orderingExclusions, readingOrder } from "../src/index.js";
 
 /**
  * T16 — the request spine.
@@ -192,5 +192,43 @@ describe("impossible monotonic paths are reported", () => {
 
   it("reports a story step that is not a relationship", () => {
     expect(analyzeSpine(chain, { story: ["nope"] }).diagnostics[0]?.code).toBe("TOP251_DESIGN_REFERENCE_NOT_FOUND");
+  });
+});
+
+describe("an authored path and an inferred one are not the same claim", () => {
+  it("marks a story as authored", () => {
+    expect(analyzeSpine(chain, { story: ["e1", "e2"] }).source).toBe("authored");
+  });
+
+  it("marks a path it worked out itself as inferred", () => {
+    expect(analyzeSpine(chain).source).toBe("inferred");
+  });
+
+  it("offers only an authored path as a reading order", () => {
+    /**
+     * Excluding feedback from layer assignment is sound however the path was found — a
+     * cycle-closing relationship is not forward progress either way. Reordering siblings
+     * is not: on a mesh the longest advancing chain is an artefact of the graph, and
+     * letting it override the barycenter traded two defects for two others across the
+     * generalization corpus. So an inferred path does not get to reorder anything.
+     */
+    expect(readingOrder(analyzeSpine(chain, { story: ["e1", "e2"] }))).toEqual(["client", "api", "worker"]);
+    expect(readingOrder(analyzeSpine(chain))).toBeUndefined();
+  });
+
+  it("still excludes feedback from an inferred path", () => {
+    const cyclic = view(
+      [{ id: "client", kind: "client" }, { id: "api" }],
+      [{ id: "e1", from: "client", to: "api" }, { id: "cb", from: "api", to: "client" }],
+    );
+    const analysis = analyzeSpine(cyclic);
+    expect(analysis.source).toBe("inferred");
+    expect(orderingExclusions(analysis)).toEqual(new Set(["cb"]));
+  });
+
+  it("does not call a story authored when none of its steps exist", () => {
+    // Otherwise a typo in every step produces an empty "authored" order that silently
+    // outranks the inferred one.
+    expect(analyzeSpine(chain, { story: ["nope"] }).source).toBe("inferred");
   });
 });

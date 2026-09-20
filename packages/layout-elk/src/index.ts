@@ -21,6 +21,7 @@ import ElkModule, {
 
 const ElkConstructor = ElkModule as unknown as new () => ElkApi;
 export { CompositionEngine, compositionScore, refineLabels, routeEdges } from "./composition.js";
+export { compareForReading, orderForReading, rankForReading, spineEntry, spinePositions, NO_HINTS, type Orderable, type OrderingHints } from "./ordering.js";
 export { banded, type BandedSpacing } from "./banded.js";
 
 const ROOT_ID = "__topoir_root__";

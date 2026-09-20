@@ -25,6 +25,18 @@ export type EdgeRole = "spine" | "branch" | "feedback";
 export interface SpineAnalysis {
   /** Components on the primary path, in the order a reader meets them. */
   readonly spine: readonly string[];
+  /**
+   * Whether the author declared this path or we inferred it.
+   *
+   * The distinction decides what the path is allowed to do. Excluding a feedback
+   * relationship from layer assignment is sound either way — a cycle-closing edge is not
+   * forward progress however the path was found. **Reordering siblings is not.** On a mesh
+   * the longest advancing chain is an artefact of the graph rather than a reading order,
+   * and letting it override the barycenter — which is measurably shortening connectors —
+   * traded two defects away for two others across the generalization corpus. An authored
+   * story is the author stating the reading order, and that outranks a heuristic.
+   */
+  readonly source: "authored" | "inferred";
   readonly edgeRoles: ReadonlyMap<string, EdgeRole>;
   /**
    * Components reached only by branches — state, identity, observability. They belong in a
@@ -63,7 +75,8 @@ export function analyzeSpine(view: MeasuredView, options: SpineOptions = {}): Sp
   // 1. The spine. An explicit story is the author telling us the order outright; without
   // one it is the longest chain of advancing relationships.
   const storyEdges = (options.story ?? []).map((id) => edgeById.get(id)).filter((edge) => edge !== undefined);
-  const spine = storyEdges.length > 0 ? chainFrom(storyEdges) : longestAdvancingChain(view);
+  const authored = storyEdges.length > 0;
+  const spine = authored ? chainFrom(storyEdges) : longestAdvancingChain(view);
   const spineIndex = new Map(spine.map((id, index) => [id, index]));
 
   // 2. Role each relationship against that order.
@@ -113,7 +126,7 @@ export function analyzeSpine(view: MeasuredView, options: SpineOptions = {}): Sp
     });
   }
 
-  return { spine, edgeRoles, supporting, diagnostics };
+  return { spine, source: authored ? "authored" : "inferred", edgeRoles, supporting, diagnostics };
 }
 
 /** The component order an ordered list of relationships walks through. */
@@ -232,6 +245,17 @@ function findCycleAmong(members: readonly string[], view: MeasuredView): readonl
  * This is what a placement stage consumes: the set to leave out of layer assignment, so a
  * callback does not push its target a band further along than the request that caused it.
  */
+/**
+ * The reading order a placement stage may arrange siblings by, or `undefined`.
+ *
+ * Only an authored story qualifies. See `SpineAnalysis.source` for why an inferred path
+ * does not: it still excludes feedback from layer assignment, it just does not get to
+ * override a heuristic that is optimising something measurable.
+ */
+export function readingOrder(analysis: SpineAnalysis): readonly string[] | undefined {
+  return analysis.source === "authored" ? analysis.spine : undefined;
+}
+
 export function orderingExclusions(analysis: SpineAnalysis): ReadonlySet<string> {
   const excluded = new Set<string>();
   for (const [id, role] of analysis.edgeRoles) if (role === "feedback") excluded.add(id);

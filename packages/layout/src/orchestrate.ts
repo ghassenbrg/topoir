@@ -2,7 +2,7 @@ import type { LayoutEngine, LayoutResult, MeasuredView } from "@topoir/core";
 import type { Diagnostic } from "@topoir/schema";
 import { CompositionEngine, ElkLayoutEngine } from "@topoir/layout-elk";
 import { admit, NO_CAPABILITIES, type BackendCapabilities, type LayoutBackend, type LayoutRequest } from "./backend.js";
-import { analyzeSpine, orderingExclusions } from "./spine.js";
+import { analyzeSpine, orderingExclusions, readingOrder } from "./spine.js";
 
 /**
  * Layout orchestration (T15).
@@ -53,7 +53,14 @@ export function compositionBackend(): LayoutBackend {
         ...(request.requiredOrder === undefined ? {} : { requiredOrder: request.requiredOrder }),
         viewId: view.id,
       });
-      const result = await engine.layout(view, orderingExclusions(analysis));
+      // Where the path enters a boundary is what orders the boundaries themselves — but
+      // only when the author declared the path. An inferred one still excludes feedback
+      // from layer assignment; it does not get to reorder siblings.
+      const order = readingOrder(analysis);
+      const result = await engine.layout(view, {
+        excludeFromOrdering: orderingExclusions(analysis),
+        ...(order === undefined ? {} : { spine: order }),
+      });
       return { ...result, diagnostics: [...analysis.diagnostics, ...result.diagnostics] };
     },
   };
