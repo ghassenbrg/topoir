@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-20. This file is the live execution ledger for the design program.
 
-**Program state: in progress. M0, M1 and M2 complete. Current task: T18 slice 3 (primary-path weighting), then T17. Current milestone: M3 (T16–T20).**
+**Program state: in progress. M0, M1 and M2 complete. Current task: T18 (routing), then T17. Current milestone: M3 (T16–T20).**
 
 The full review previously verified `bc64cf2`: 91 tests in 15 files passed; 240/240 synthetic cases compiled without hard geometry defects; 220/240 passed the selected defect counters; six reference candidates were deterministic with no approved parity recorded. These are historical baseline observations, not evidence that the tasks below are implemented. The design-writing task added documents/examples only.
 
@@ -28,7 +28,7 @@ Allowed task states: `not_started`, `in_progress`, `implemented_pending_gate`, `
 | T15 | M2 | complete | `@topoir/layout` orchestration with declared backend capabilities and constraint admission; `layout-elk` unchanged as an adapter. See session entry. |
 | T16 | M3 | implemented_pending_gate | Slices 1–3 land: spine analysis, feedback roles, impossible-order reporting, reading order across siblings, and supporting components anchored under their owner. All three acceptance criteria met and asserted (`packages/sdk/test/progression.test.ts`). **Gate: target-size visual review** — a human audit of the slice-2 render is recorded below with 19 findings; reference parity remains 0/6 `unreviewed`. Mixed local orientation deferred to T18. See session entries. |
 | T17 | M3 | not_started | |
-| T18 | M3 | in_progress | Slice 1: endpoint ports honoured in the panel families. Slice 2: region arrangement search (rows *and* columns, with stretching), the exit-corridor rule, and the medium threaded into the composition score so the search and the acceptance gate judge one thing. Trust-zone showcase 9 crossings to 3; both reproduction fixtures accepted, `ref-01` from 4 illegal boundary crossings to 0. See session entries.
+| T18 | M3 | in_progress | Slice 1: endpoint ports honoured in the panel families. Slice 2: region arrangement search (rows *and* columns, with stretching), the exit-corridor rule, and the medium threaded into the composition score. Slice 3: routes lose the turns nothing forced, and a region's title reserves its own ink rather than the whole top band (D23). Corpus fully-clean cases 219 to 231 of 240; edge crossings across the corpus down 28%; illegal boundary crossings 26 to 4. See session entries.
 | T19 | M3 | not_started | |
 | T20 | M3 | not_started | |
 | T21 | M4 | not_started | |
@@ -1959,3 +1959,119 @@ on a supporting connector, and the score currently charges them the same 8 point
 column arrangement that would put the FDC zone directly below the GCP zone — which is what
 the reference does — is rank 2 by shape and loses by roughly the aspect penalty. Making the
 spine's own straightness a term is the honest way to let it win when it deserves to.
+
+## T18 slice 3 — the turns nothing forced, and what a title actually occupies (2026-09-20)
+
+Slice 2 put the regions in the right places. This is about what the connectors then do
+between them, and it is the largest measured improvement of the program so far.
+
+### 1. Routes lose the turns nothing forced
+
+The router builds each connector by stepping around obstacles, and the finished polyline
+keeps steps that were needed at the moment they were taken and are not needed in the
+picture. The agent-request map's primary connector ran down, **right 61px**, down, left
+572px, down, left — the short right step is residue, and a reader following the story meets
+two turns that mean nothing.
+
+`straightenRoute` replaces a run between two points the route already passes through with an
+L between them, when that L removes a turn, does not add length, and touches nothing. Both
+orientations are tried, longest span first. Because every candidate is checked against the
+same obstacles the router used, a simplification can never put a connector through
+something — that is the safety property, and it is asserted directly.
+
+### 2. A title reserves its own ink, not the region's whole top band
+
+This is the one that mattered. A heading obstacle was the region's full width by the title's
+height: on a 1699px-wide region labelled "FDC", 1699px of horizontal corridor reserved for
+six characters. A connector arriving from above could not descend into the region at all —
+it had to travel to the region's edge and come in sideways.
+
+The box is now the title's own ink: from the region's left edge to the same 16px inset past
+the end of the measured label. `titleObstacle` lives in `@topoir/core` and is used by both
+the router and the quality analysis, so a route that is legal is never then counted as
+crossing a title. Recorded as **D23**, because it changes what
+`TOP431_GROUP_TITLE_INTERSECTION` means; it can only ever report fewer intersections for the
+same geometry, so nothing can newly fail that gate.
+
+### Measured outcome
+
+The corpus moved more than any change so far:
+
+| Across 240 synthetic cases | before | after |
+| --- | ---: | ---: |
+| free of every measured defect | 219 (91.3%) | **231 (96.3%)** |
+| cases needing attention | 21 | **9** |
+| edge crossings, total | 10569 | **7634** (−28%) |
+| coincident edge segments | 96 | **29** |
+| illegal boundary crossings | 26 | **4** |
+| label overlaps | 2 | **0** |
+| group title intersections | 5 | **1** |
+| `layers` family fully clean | 63 / 75 | **74 / 75** |
+| elapsed | 242.5s | **171.5s** |
+
+Faster because there is less obstacle to search around. One case regressed into the list
+(`case-0172`, 2 illegal boundary crossings) and two kept a coincident segment or two more
+than before; twelve left it.
+
+On the two reproductions and the showcase:
+
+| | before slice 3 | after |
+| --- | --- | --- |
+| `ref-03` primary connector | 1.54x over 4 bends | **1.33x over 1 bend** |
+| `ref-03` shape | 2.84 against a 2.2 target | **2.23**, deviation 0.013 |
+| `ref-01` worst connector | 5.05x | **1.87x** |
+| trust-zone showcase worst | 3.70x over 4 bends | **1.70x over 2 bends** |
+| Pockito reference | 0 crossings | **unchanged, byte-identical** |
+
+`ref-03` is now the reference's composition: the client zone is a full-height column on the
+left, and the GCP, FDC and external zones are one channel beside it, each directly below the
+last. The request leaves the agent core, drops straight down into the zone below and reaches
+the gateway — which is what the reference draws and what four earlier attempts could not
+produce.
+
+### Verification
+
+| Command | Outcome |
+| --- | --- |
+| `pnpm check` | **573 tests in 38 files passed** (566 before) |
+| render comparison | **two goldens changed**, both inspected before regenerating: `showcase/trust-zones.png` and `showcase/paired-regions.png` (one connector, 2.00x to 1.94x) |
+| `pnpm benchmark:generalization` | table above; 9 cases needing attention, down from 21 |
+| `pnpm benchmark:references` | all six deterministic and geometrically clean; `ref-01`, `ref-02`, `ref-04`, `ref-05` at 0 crossings |
+| load-bearing check | disabling the straightening fails 1 test; widening the title box back to the region fails 1 |
+
+**Changed:** `core/src/quality.ts` (`titleObstacle`), `layout-elk/src/{composition,index}.ts`,
+`docs/design/{05-composition-and-routing,DECISIONS}.md`, `docs/diagnostics.md`,
+`benchmarks/reference-cases.json`.
+**Tests:** `layout-elk/test/straighten.test.ts` (new, 6), `core/test/quality.test.ts` (+1,
+and the existing case was made to actually cross the words).
+
+### Tried and not shipped: weighting the primary path in the score
+
+A bend on the story costs a reader more than a bend on a supporting dependency, and the
+score charges both 8 points. I implemented a term that adds 120 per bend and 300 per unit of
+detour on the connectors the spine analysis marks as `spine`, and measured it.
+
+Ungated it changed one diagram — the trace-pipeline reproduction, which declares no story —
+and the change was a wash: a smaller canvas, one connector from 15.05x to below the top six,
+another from 2.06x to 5.05x. Gated to an authored story, as reading order already is, it
+changed **nothing**: every shipped diagram picked the same candidate with and without it.
+
+The trace explains why: on the agent-request map the winning arrangement already had the
+lowest primary-path cost of every candidate (1668 against 1894–2486), so the existing length
+and bend terms already track spine straightness closely on this content. Shipping an
+unexercised scoring weight is a liability, so it was reverted. Recorded here so the next
+attempt starts from the measurement rather than the intuition.
+
+### State of the two reproductions
+
+Both compile, both are accepted, both are geometrically clean, and both are now the
+reference's composition rather than a differently-shaped diagram with the same content.
+Neither is a reproduction, and no automated result here is evidence of visual parity.
+**Reference parity remains 0/6 `unreviewed`** — only a person may record one, in
+`benchmarks/reference-reviews.json`, against the hashes printed in
+`.tmp/reference-benchmark/report.json`.
+
+**Next:** the remaining differences from `exple3` are within-region: the gateway's database
+is drawn beside it rather than below it, the note sits outside the zone it annotates, and
+the zone is wider than its contents need. None of those is a routing defect, which is what
+T18 owns; they belong with T19's fitting and whitespace work.

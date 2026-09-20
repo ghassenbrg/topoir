@@ -1,4 +1,4 @@
-import { analyzeGeometry, fitToMedium, type Medium, type QualityReport, type GeometryView, type GeometryNode, type GeometryGroup, type GeometryEdge, type GeometryPort, type GeometryAnnotation, type LayoutResult, type LayoutEngine, type MeasuredView, type Point, type Rect, type MeasuredNode } from "@topoir/core";
+import { analyzeGeometry, fitToMedium, titleObstacle, type Medium, type QualityReport, type GeometryView, type GeometryNode, type GeometryGroup, type GeometryEdge, type GeometryPort, type GeometryAnnotation, type LayoutResult, type LayoutEngine, type MeasuredView, type Point, type Rect, type MeasuredNode } from "@topoir/core";
 import { ElkLayoutEngine } from "./index.js";
 import { obstacleRoute, segmentHitsRect } from "./routing.js";
 import { banded, portsFor, type BandedSpacing } from "./banded.js";
@@ -400,7 +400,8 @@ function panels(view: MeasuredView, kind: "comparison" | "swimlanes" | "architec
   // produce coincident routes (2 at a 1.6 target on that content) and nothing removes them;
   // that is an open routing defect for T18/T19, not something to paper over with a stage
   // that measurably does not help here.
-  const edges = routeEdges(view, nodes, groups, distributeLanes, laneOrder);
+  const routed = straightenRoutes(view, { id: view.id, nodes, groups, edges: routeEdges(view, nodes, groups, distributeLanes, laneOrder), annotations: [], bounds: { x: 0, y: 0, width: root.width, height: root.height } });
+  const edges = routed.edges;
   const annotations = placeAnnotations(view, nodes, groups, edges, root.height);
   const geometry = refineLabels(view, { id: view.id, nodes, groups, edges, annotations, bounds: { x: 0, y: 0, width: Math.max(root.width, ...annotations.map((a) => a.x + a.width + 24)), height: root.height + (annotations.length ? Math.max(...annotations.map((a) => a.height)) + 44 : 0) } });
   return { geometry, arrangements: arrangementCount };
@@ -679,10 +680,8 @@ function routingObstacles(
   const belongs = (nodeId: string | undefined, groupId: string): boolean =>
     nodeId !== undefined && ancestorsOf(view, nodeId).has(groupId);
   const endpoints = geometry.nodes.filter((node) => node.id === from || node.id === to);
-  const headings = geometry.groups.map((group) => ({
-    ...group,
-    height: view.groups.find((item) => item.id === group.id)?.titleHeight ?? 38,
-  }));
+  // Only the title's own ink, not the whole top band; see `titleObstacle`.
+  const headings = geometry.groups.map((group) => titleObstacle(view.groups.find((item) => item.id === group.id), group));
   const outside = geometry.groups.filter((group) => !belongs(from, group.id) && !belongs(to, group.id));
   const crossOnce = geometry.groups.filter((group) => belongs(from, group.id) !== belongs(to, group.id));
   return {
@@ -1249,6 +1248,72 @@ function separateOnce(view: MeasuredView, geometry: GeometryView): GeometryView 
     if (sharedWith(candidate, others) >= before) continue;
     edges[index] = candidate;
   }
+  return { ...geometry, edges };
+}
+
+/**
+ * Take the excursions out of a route that nothing forced it into.
+ *
+ * The router builds each connector by stepping around obstacles, and the result carries
+ * steps that were needed at the moment they were taken and are not needed in the finished
+ * picture. On the agent-request map the connector from the core service to the gateway
+ * below ran down, **right 61px, down, left 572px**, down, left: the short right step is
+ * pure residue, and a reader following the story meets two turns that mean nothing.
+ *
+ * This is a simplification, not a reroute. Every candidate replacement is an L between two
+ * points the route already passes through, so the connector still starts and ends where it
+ * did and still runs orthogonally. A replacement is taken only when it removes a turn
+ * without adding length and without touching anything — so it can never introduce an
+ * overlap, and never trades a bend for a longer path.
+ *
+ * Both L orientations are tried because only one of them is usually clear.
+ */
+export function straightenRoute(points: readonly Point[], obstacles: readonly Rect[]): Point[] {
+  if (points.length < 4) return [...points];
+  let best = [...points];
+  const clear = (a: Point, b: Point): boolean => !obstacles.some((rect) => segmentHitsRect(a, b, rect));
+  const walk = (route: readonly Point[]): number => {
+    let total = 0;
+    for (let i = 1; i < route.length; i += 1) total += distance(route[i - 1]!, route[i]!);
+    return total;
+  };
+  for (let changed = true; changed; ) {
+    changed = false;
+    // Longest span first: collapsing a wide excursion in one move beats nibbling at it.
+    outer: for (let span = best.length - 1; span >= 2 && !changed; span -= 1) {
+      for (let start = 0; start + span < best.length; start += 1) {
+        const head = best[start]!;
+        const tail = best[start + span]!;
+        const corners = [{ x: tail.x, y: head.y }, { x: head.x, y: tail.y }];
+        for (const corner of corners) {
+          const replacement = [head, corner, tail].filter(
+            (point, index, all) => index === 0 || point.x !== all[index - 1]!.x || point.y !== all[index - 1]!.y,
+          );
+          if (replacement.length >= span + 1) continue; // no turn removed
+          if (!clear(head, corner) || !clear(corner, tail)) continue;
+          const candidate = [...best.slice(0, start), ...replacement, ...best.slice(start + span + 1)];
+          if (walk(candidate) > walk(best) + 0.5) continue;
+          best = candidate;
+          changed = true;
+          break outer;
+        }
+      }
+    }
+  }
+  return best;
+}
+
+/** Every connector, with the excursions nothing forced taken out. See `straightenRoute`. */
+function straightenRoutes(view: MeasuredView, geometry: GeometryView): GeometryView {
+  const edges = geometry.edges.map((edge) => {
+    if (edge.points.length < 4) return edge;
+    const semantic = view.edges.find((item) => item.id === edge.id);
+    const start = edge.points[0]!;
+    const end = edge.points[edge.points.length - 1]!;
+    const { obstacles } = routingObstacles(view, geometry, semantic?.from, semantic?.to, [start, end], 6);
+    const points = straightenRoute(edge.points, obstacles);
+    return points.length === edge.points.length ? edge : { ...edge, points };
+  });
   return { ...geometry, edges };
 }
 

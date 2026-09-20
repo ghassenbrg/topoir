@@ -20,7 +20,7 @@ import ElkModule, {
 } from "elkjs/lib/elk.bundled.js";
 
 const ElkConstructor = ElkModule as unknown as new () => ElkApi;
-export { CompositionEngine, compositionScore, refineLabels, regionArrangements, routeEdges } from "./composition.js";
+export { CompositionEngine, compositionScore, refineLabels, regionArrangements, routeEdges, straightenRoute } from "./composition.js";
 export type { PlacedRegion, RegionArrangement, Sized } from "./composition.js";
 export { alignToAnchors, compareForReading, orderForReading, packForReading, rankForReading, spineEntry, spinePositions, NO_HINTS, type Cell, type Orderable, type OrderingHints } from "./ordering.js";
 export { banded, type BandedSpacing } from "./banded.js";

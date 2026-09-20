@@ -3,6 +3,7 @@ import type {
   GeometryEdge,
   GeometryGroup,
   GeometryView,
+  MeasuredText,
   MeasuredView,
   Point,
   Rect,
@@ -53,6 +54,33 @@ const SHAPE_FLOOR = 6;
 const ASPECT_TOLERANCE = Math.log(3);
 const SPARSE_COVERAGE = 0.06;
 
+/**
+ * The box a region's title actually occupies.
+ *
+ * This used to be the region's full width by the title's height — the whole top band. That
+ * is far more than the title: a 1700px-wide zone labelled "FDC" reserved 1700px of
+ * horizontal corridor for six characters, and a connector wanting to enter the region from
+ * above had to travel to the region's edge and come in sideways, which on the agent-request
+ * map cost two bends and a 570px excursion in the diagram's primary path.
+ *
+ * The title is drawn 16px in from the region's left edge, so the ink runs from there to
+ * `labelText.width` beyond. The box here starts at the region's edge — the corner and the
+ * inset are part of what the title needs to stay legible — and ends a matching inset past
+ * the text. Everything to the right of that is empty band a connector may cross.
+ *
+ * Both the router and this analysis use it, so a route that is legal is also one that is
+ * not then counted as crossing a title.
+ */
+export function titleObstacle(
+  measured: { readonly titleHeight: number; readonly labelText: MeasuredText } | undefined,
+  group: Rect & { readonly id: string },
+): Rect & { readonly id: string } {
+  const inset = 16;
+  const height = measured?.titleHeight ?? 38;
+  const width = measured === undefined ? group.width : Math.min(group.width, inset * 2 + measured.labelText.width);
+  return { id: group.id, x: group.x, y: group.y, width, height };
+}
+
 export function analyzeGeometry(view: MeasuredView, geometry: GeometryView): QualityReport {
   const diagnostics: Diagnostic[] = [];
   const nodeById = new Map(geometry.nodes.map((node) => [node.id, node]));
@@ -70,7 +98,7 @@ export function analyzeGeometry(view: MeasuredView, geometry: GeometryView): Qua
   let detachedEndpoints = 0;
   let outOfBounds = 0;
   let regionNestingErrors = 0;
-  const headings = geometry.groups.map((group) => ({ ...group, height: view.groups.find((g) => g.id === group.id)?.titleHeight ?? 38 }));
+  const headings = geometry.groups.map((group) => titleObstacle(view.groups.find((item) => item.id === group.id), group));
   // In a sequence, a message meets a participant's lifeline — the vertical line descending
   // from its header — not the header box itself. That is a different attachment surface,
   // not an exemption: a message still has to land on the line it claims.

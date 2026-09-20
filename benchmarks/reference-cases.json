@@ -50,8 +50,8 @@
     "gaps": [
       "The fixture preserves the four unequal zones, state below compute, external branches, the gateway route table and the anchored note.",
       "Lane distribution separates connectors that share a component side, so none of the five relationships this case once hid is drawn under another.",
-      "The primary request path now reads as one progression: it advances at every step except two true carriage returns, each of which wraps to a row at the left margin, and the zones are met in the order the request enters them.",
-      "Visible crossings are down from 13 to 3 and the drawing sits within 3% of the requested proportion, but the dependency band still crosses the application area rather than staying at the margin.",
+      "The primary request path reads as one progression: it advances at every step except true carriage returns that wrap to a row at the left margin, and the zones are met in the order the request enters them.",
+      "Visible crossings are down from 13 to 4 and the drawing sits within 3% of the requested proportion, but the dependency band still crosses the application area rather than staying at the margin.",
       "Whitespace is still unbalanced: the GCP zone is wider than its contents need, and the lower right of the canvas is empty at reference density."
     ]
   },

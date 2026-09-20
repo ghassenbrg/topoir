@@ -45,6 +45,8 @@ Adapters receive constraints they support. Hard conditions unavailable in ELK mu
 
 Containment is checked for groups as well as nodes. Presentation overlays may intersect, but unrelated opaque region panels may not hide each other. Nested headings and padding are measured reservations, not a fixed magic title height.
 
+A heading reserves the box its own text needs, not the region's full width. On a wide region that difference is most of the top band, and reserving all of it forces a connector entering from above to travel to the region's edge and come in sideways. The router and the quality analysis share one definition of the box (`titleObstacle`), so a route that is legal is never then reported as crossing a title. See D23.
+
 ## Routing contract
 
 `RoutePlan` contains relationship ID(s), source/target attachment IDs, ordered boundary transitions, allowed portals, intentional junctions, style/flow identity, lane preference and label requirements. `RoutedRelationship` contains owned segments, curves or polylines, junction IDs, endpoint attachment evidence, labels and all underlying semantic relationship IDs.

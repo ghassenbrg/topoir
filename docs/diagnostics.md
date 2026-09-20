@@ -80,7 +80,7 @@ Do not parse message wording. Match `code`, then use `path` and `range` to edit 
 | `TOP426_EDGE_ENDPOINT_DETACHED` | A route does not meet the component it claims to connect. A connector may attach to the component, to one of its declared ports, or — in a sequence — to the participant's lifeline. The message gives the measured gap |
 | `TOP425_EDGE_SEGMENTS_COINCIDENT` | Two connectors are drawn along the same line for a visible stretch, so two relationships read as one; inspect the composition or report a routing defect |
 | `TOP430_LABEL_OVERLAP` | Inspect colliding node, heading, annotation or edge label; revise composition or report a refinement defect |
-| `TOP431_GROUP_TITLE_INTERSECTION` | A connector crosses a boundary heading; inspect the route/refinement |
+| `TOP431_GROUP_TITLE_INTERSECTION` | A connector crosses a boundary's title text; inspect the route/refinement. The empty band beside the title is not part of it, so crossing there is not reported |
 | `TOP432_ANNOTATION_OVERLAP` | A note overlaps a node, heading or another annotation |
 | `TOP433_ASPECT_OFF_TARGET` | The diagram is more than 3x away from the view's `layout.aspectRatio`, so it is not the shape it was asked for; raise the component count it has room for, or set a target that suits the model |
 | `TOP434_CANVAS_SPARSE` | Components cover under 6% of the canvas, so the diagram reads as mostly empty space |
