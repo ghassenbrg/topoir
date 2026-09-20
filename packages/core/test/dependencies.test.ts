@@ -19,6 +19,7 @@ const LAYERS: readonly (readonly string[])[] = [
   ["@topoir/schema", "@topoir/assets"],
   ["@topoir/core"],
   ["@topoir/layout-elk", "@topoir/renderer-svg"],
+  ["@topoir/layout"],
   ["@topoir/sdk"],
   ["@topoir/cli", "@topoir/mcp"],
 ];

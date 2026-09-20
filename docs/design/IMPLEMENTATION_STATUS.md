@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-19. This file is the live execution ledger for the design program.
 
-**Program state: in progress. M0 and M1 complete. Next task: T15. Current milestone: M2 (T10–T15).**
+**Program state: in progress. M0, M1 and M2 complete. Next task: T16. Current milestone: M3 (T16–T20).**
 
 The full review previously verified `bc64cf2`: 91 tests in 15 files passed; 240/240 synthetic cases compiled without hard geometry defects; 220/240 passed the selected defect counters; six reference candidates were deterministic with no approved parity recorded. These are historical baseline observations, not evidence that the tasks below are implemented. The design-writing task added documents/examples only.
 
@@ -25,7 +25,7 @@ Allowed task states: `not_started`, `in_progress`, `implemented_pending_gate`, `
 | T12 | M2 | complete | Presentation plan with per-field dispositions, normalized medium and audience floors, compiled constraints with contradiction detection. Boundary focus now actually works. See session entry. |
 | T13 | M2 | complete | Style resolution with authored-token tracking, semantic roles surviving focus/muting, surface-aware text colour. Fixed all 9 invisible-text corpus cases with zero golden changes. See session entry. |
 | T14 | M2 | complete | valid/completion/accepted separated, one gate order for all families, lexicographic candidate vector, absent metrics stay absent. Legacy `ok` preserved. See session entry. |
-| T15 | M2 | not_started | |
+| T15 | M2 | complete | `@topoir/layout` orchestration with declared backend capabilities and constraint admission; `layout-elk` unchanged as an adapter. See session entry. |
 | T16 | M3 | not_started | |
 | T17 | M3 | not_started | |
 | T18 | M3 | not_started | |
@@ -57,7 +57,7 @@ Allowed task states: `not_started`, `in_progress`, `implemented_pending_gate`, `
 | --- | --- | --- |
 | M0 trustworthy baseline | complete | T00–T04 complete; all 12 reproduced review defects fixed or explicitly diagnosed; 189 tests pass; benchmark claims match measured evidence. See the M0 gate entry. |
 | M1 shared components/scene | complete | One measured placement computation behind both plan and drawing; full scene ownership; two-directional content accounting. See the M1 gate entry. |
-| M2 versioned presentation | not_started | Schema/migration/constraints/registry and examples agree |
+| M2 versioned presentation | complete | Envelope, identities, presentation, style, acceptance and layout separation all delivered; registry and fixtures agree exactly. See the M2 gate entry. |
 | M3 architecture quality | not_started | T20 corpus and actual review decisions |
 | M4 multi-family compiler | not_started | T25 architecture/process/interaction acceptance |
 | M5 agent revision | not_started | Shared API/discovery/transactions/prior layout |
@@ -1289,3 +1289,84 @@ always zero until **T29** supplies prior geometry.
 (T18/T19), 20 soft geometry failures. Reference parity remains **0/6 unreviewed**.
 
 **Next ready task: T15** (separate composition from ELK translation), which closes M2.
+
+### T15 — separate composition from ELK translation — 2026-09-20
+
+**Task: T15 — separate composition from ELK translation. State: complete.**
+
+Baseline commit `05edfb3` (T14). No unrelated worktree changes.
+
+**What was wrong.** Planning, placement, routing and refinement lived in one 940-line module
+alongside the ELK translation. None could be reasoned about, replaced or tested
+independently, and "can this backend honour a required ordering constraint?" had no answer
+short of reading it. A caller could hand a backend a constraint it silently ignored, and the
+result would look like a layout that simply chose not to obey.
+
+**Behavior implemented.** New `@topoir/layout` package owning the contract:
+
+1. **A backend declares what it supports** — which constraint types it can enforce, and whether it does containment, routing, explicit attachment sites, multiple candidates and stable re-layout. The composition backend declares containment, routing and attachments **true**, and constraints, candidates and stability **false**. That is the honest answer, and saying it out loud is the point of the task.
+
+2. **A required constraint the backend cannot enforce fails, and no layout is attempted.** Returning geometry that ignored it would misreport what was honoured and leave the caller no way to tell. A **preferred** one it cannot enforce is a warning and layout continues — a preference not being met is a legitimate outcome, but the caller is still told rather than left to infer it from the picture. Same for a supplied prior layout or a candidate count the backend cannot act on.
+
+3. **`layout-elk` is untouched** and wrapped as one backend among others. `OrchestratedLayoutEngine` implements the existing `LayoutEngine`, so every current caller keeps working; passing a request is how a caller opts into admission without a breaking change.
+
+4. **The SDK routes through the orchestrator** when no custom engine is supplied, handing it the constraints T12 compiled. A caller's own `LayoutEngine` still bypasses it, which is what makes the hostile-geometry probes in the review fixtures continue to work.
+
+**Files added:** `packages/layout/` (`package.json`, `tsconfig.json`, `README.md`,
+`src/backend.ts`, `src/orchestrate.ts`, `src/index.ts`, `test/backend.test.ts` — 16
+assertions). **Changed:** `sdk/src/index.ts` and its manifest,
+`schema/src/diagnostics.ts` (`TOP470`, `TOP471`), `core/test/dependencies.test.ts` (new
+layer tier), `docs/diagnostics.md`.
+
+**Verification:**
+
+| Command | Outcome |
+| --- | --- |
+| `pnpm exec vitest run packages/layout/test/backend.test.ts` | 16 passed |
+| `pnpm check` | build + typecheck clean; **481 tests in 34 files passed** (465 after T14) |
+| render comparison | all 20 byte-identical |
+| dependency direction test | passes with `@topoir/layout` in its own tier above `layout-elk` |
+
+**Acceptance:**
+
+- *Backend capabilities are explicit* — declared per backend and asserted, including that the composition engine does **not** claim constraints, candidates or stability.
+- *Unsupported hard constraints fail* — asserted that no geometry is produced, and separately that a preferred constraint warns and continues.
+- *No dependency cycle* — the existing test covers it, with the layer table extended.
+- *Current layout remains available through adapter* — `OrchestratedLayoutEngine` satisfies `LayoutEngine`; every render is byte-identical.
+
+**Carried work.** This separates the *contract* from the ELK translation. It does not yet
+split `composition.ts` itself into planning, placement, routing and refinement modules — the
+940 lines are still one file behind the backend interface. Doing that is only useful once
+something varies those stages independently, which is **T16** (request-spine strategy) and
+**T18** (portals and routing lanes). Recorded rather than implied by the task being complete.
+
+### M2 gate — versioned semantics and executable presentation — 2026-09-20
+
+**Gate: M2. State: complete.**
+
+Exit criterion: *"V2 contracts can represent and inspect architecture, process and
+interaction without forcing all semantics into a topology graph. Examples and registry agree
+with implemented maturity."*
+
+| Clause | Evidence |
+| --- | --- |
+| V2 contracts represent all three families without forcing graph semantics | T05's fixtures build **one** `ComponentPlan` structure for a gateway route table, a process decision and an interaction participant, with three distinct silhouettes, three attachment roles and identical key sets. Asserted, not argued |
+| Examples and registry agree with implemented maturity | Verified directly: `architecture` loads; `process` and `interaction` are rejected with `TOP105_FAMILY_NOT_IMPLEMENTED`, exactly matching the registry's `unsupported` with `plannedIn` T21 and T23 |
+
+**An ambiguity worth naming rather than resolving in my own favour.** "Represent and
+inspect" could be read as requiring *document body schemas* for process and interaction. It
+cannot mean that here: T21 and T23 implement those bodies and are M4 tasks, so no M2 task
+delivers them. On the narrower reading — that the component, scene and presentation
+contracts accommodate all three families — the criterion is met and tested. On the wider
+reading it is not, and would not be until M4. Both readings are recorded so a later agent is
+not misled by "M2 complete".
+
+**Tally across M0–M2:** tests 91 → 481, in 34 files. All 20 example and showcase renders are
+byte-identical to the goldens, with the single deliberate, inspected exception from T01.
+Generalization improved from 30 failures to **21** (T13 fixed all nine invisible-text cases).
+All twelve original review defects are fixed rather than reported.
+
+**Outstanding gate, unchanged and not claimed:** reference parity is **0/6, `unreviewed`**.
+
+**Next ready task: T16** (primary path and supporting regions), which opens M3. Its
+dependencies T15 and T12 are complete.

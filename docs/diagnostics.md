@@ -119,6 +119,8 @@ measured text run carries `source`, a `disposition` of `rendered` or `abbreviate
 `omittedGraphemes` when abbreviated. The view metrics `abbreviatedTextRuns` and
 `omittedGraphemes` total it for the view.
 
+| `TOP470_CONSTRAINT_UNSUPPORTED` | A **required** layout constraint the chosen backend cannot enforce. No layout is attempted: geometry that ignored the constraint would misreport what was honoured. Relax it to `preferred`, or use a backend that supports it |
+| `TOP471_CONSTRAINT_NOT_HONOURED` | A **preferred** constraint, prior layout or candidate count the backend cannot act on. Layout continues, and the caller is told rather than left to infer it from the picture |
 | `TOP460_TEXT_BELOW_MEDIUM_MINIMUM` | Fitting the drawing to the requested medium reduces text below the minimum that medium declares. Legal geometry, unreadable at the size it is for |
 | `TOP461_SCALED_TO_FIT` | The drawing is larger than the medium and was scaled down. A warning when the result is still legible, an error when it is not |
 

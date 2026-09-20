@@ -1,7 +1,7 @@
 {
-  "name": "@topoir/sdk",
+  "name": "@topoir/layout",
   "version": "0.1.0-alpha.0",
-  "description": "Programmatic TopoIR compiler API",
+  "description": "Layout orchestration for TopoIR: backend capabilities, constraint admission and candidate selection",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -26,16 +26,12 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@topoir/assets": "workspace:*",
     "@topoir/core": "workspace:*",
     "@topoir/layout-elk": "workspace:*",
-    "@topoir/renderer-svg": "workspace:*",
-    "@topoir/schema": "workspace:*",
-    "@topoir/layout": "workspace:*"
+    "@topoir/schema": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "fast-check": "^4.3.0",
     "tsup": "^8.5.0",
     "typescript": "^6.0.0"
   }

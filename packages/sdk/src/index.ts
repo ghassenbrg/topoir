@@ -30,6 +30,7 @@ import {
   type ViewGraph,
 } from "@topoir/core";
 import { CompositionEngine } from "@topoir/layout-elk";
+import { compositionBackend, orchestrate } from "@topoir/layout";
 import {
   buildScene,
   renderPng,
@@ -276,7 +277,13 @@ export class TopoIRCompiler {
         for (const reference of required) if (!assets.resolve(reference)) diagnostics.push({ code: "TOP322_ASSET_NOT_FOUND", severity: "error", message: `Asset ${JSON.stringify(reference)} on ${node.id} was not found; add it to the configured inventory.` });
         for (const reference of optional) if (!assets.resolve(reference)) diagnostics.push({ code: "TOP322_ASSET_NOT_FOUND", severity: "warning", message: `Asset ${JSON.stringify(reference)} on ${node.id} was not found; using the semantic kind fallback.` });
       }
-      const layout = await layoutEngine.layout(measured);
+      // Layout goes through the orchestrator, which admits the request against the
+      // backend's declared capabilities first. A required constraint the backend cannot
+      // enforce fails here rather than producing geometry that quietly ignored it.
+      const layout =
+        options.layoutEngine === undefined
+          ? await orchestrate(measured, compositionBackend(), { constraints: presentation.plan.constraints })
+          : await layoutEngine.layout(measured);
       diagnostics.push(...layout.diagnostics);
       if (layout.geometry === undefined) continue;
 
