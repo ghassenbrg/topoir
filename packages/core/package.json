@@ -28,6 +28,6 @@
     "@types/node": "^24.0.0",
     "@types/fontkit": "^2.0.9",
     "tsup": "^8.5.0",
-    "typescript": "^6.0.0"
+    "typescript": "^7.0.2"
   }
 }
